@@ -1,6 +1,6 @@
 //! Command-line interface for `cc-profile`: argument parsing and dispatch.
 
-use crate::config::ConfigRepository;
+use crate::config::{ConfigRepository, Profile};
 use crate::interactive;
 use crate::services::profiles;
 use anyhow::Result;
@@ -156,7 +156,6 @@ fn show_config(repository: &ConfigRepository) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 struct NewProfileInput {
     name: String,
     endpoint: String,
@@ -168,7 +167,6 @@ struct NewProfileInput {
     active: bool,
 }
 
-#[allow(dead_code)]
 struct EditProfileInput {
     profile: String,
     endpoint: Option<String>,
@@ -180,16 +178,76 @@ struct EditProfileInput {
     rename: Option<String>,
 }
 
-fn create_profile_command(_repository: &ConfigRepository, _input: NewProfileInput) -> Result<()> {
-    command_not_ready("new", "Task 3")
+fn create_profile_command(repository: &ConfigRepository, input: NewProfileInput) -> Result<()> {
+    let mut config = repository.load()?;
+    let profile = Profile::builder()
+        .endpoint(input.endpoint)
+        .api_key(input.api_key)
+        .fable(input.fable)
+        .opus(input.opus)
+        .sonnet(input.sonnet)
+        .haiku(input.haiku)
+        .build();
+    profiles::create_profile(&mut config, &input.name, profile, input.active)?;
+    repository.save(&config)?;
+    println!("Profile \"{}\" saved.", input.name);
+    if input.active {
+        println!("Profile \"{}\" is now active.", input.name);
+    }
+    Ok(())
 }
 
-fn edit_profile_command(_repository: &ConfigRepository, _input: EditProfileInput) -> Result<()> {
-    command_not_ready("edit", "Task 3")
+fn edit_profile_command(repository: &ConfigRepository, input: EditProfileInput) -> Result<()> {
+    let mut config = repository.load()?;
+    let original_name = input.profile;
+    let mut current_name = original_name.clone();
+
+    if let Some(new_name) = input.rename.as_deref() {
+        profiles::rename_profile(&mut config, &original_name, new_name)?;
+        current_name = new_name.to_string();
+    }
+
+    let mut profile = config
+        .profiles
+        .get(&current_name)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Profile '{}' does not exist", current_name))?;
+
+    if let Some(value) = input.endpoint {
+        profile.endpoint = value;
+    }
+    if let Some(value) = input.api_key {
+        profile.api_key = value;
+    }
+    if let Some(value) = input.fable {
+        profile.fable = value;
+    }
+    if let Some(value) = input.opus {
+        profile.opus = value;
+    }
+    if let Some(value) = input.sonnet {
+        profile.sonnet = value;
+    }
+    if let Some(value) = input.haiku {
+        profile.haiku = value;
+    }
+
+    profiles::update_profile(&mut config, &current_name, profile)?;
+    repository.save(&config)?;
+    println!("Profile \"{current_name}\" updated.");
+    Ok(())
 }
 
-fn delete_profile_command(_repository: &ConfigRepository, _name: &str) -> Result<()> {
-    command_not_ready("delete", "Task 3")
+fn delete_profile_command(repository: &ConfigRepository, name: &str) -> Result<()> {
+    let mut config = repository.load()?;
+    let was_active = config.active_profile.as_deref() == Some(name);
+    profiles::delete_profile(&mut config, name)?;
+    repository.save(&config)?;
+    println!("Profile \"{name}\" deleted.");
+    if was_active {
+        println!("No active profile is currently set.");
+    }
+    Ok(())
 }
 
 fn command_not_ready(command: &str, task: &str) -> Result<()> {
