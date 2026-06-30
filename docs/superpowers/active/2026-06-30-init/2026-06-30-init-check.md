@@ -9,7 +9,7 @@
 
 ## Scope
 
-- [x] Goal delivered: Rust `cc-profile` CLI with `~/.cc-profile` TOML storage, interactive `dialoguer` UI, non-interactive subcommands, and `claude` launch with global envs + active-profile `ANTHROPIC_*` + optional `--dangerously-skip-permissions`
+- [x] Goal delivered: Rust `cc-profile` CLI with `~/.cc-profile/config.toml` TOML storage, interactive `dialoguer` UI, non-interactive subcommands, and `claude` launch with global envs + active-profile `ANTHROPIC_*` + optional `--dangerously-skip-permissions`
 - [x] Tasks completed: 18/18 across Parts 1–4 (plan checkboxes marked complete in part plans 1–3; Part 4 Tasks 1–3 implemented in `da7dff7` / `6f3ec85` / `38bfec7`)
 - [x] Deviations:
   - Env listing order follows `BTreeMap` lexicographic order (`HTTPS_PROXY` before `HTTP_PROXY`), not one plan snippet’s HTTP-before-HTTPS wording.
@@ -47,7 +47,7 @@ Setup: temporary `CC_PROFILE_MANUAL_HOME` as `HOME`; `cargo build`; Claude shim 
 | 4 Delete active with confirm | PASS | PTY rerun after review: first delete confirmation answered `no`, profile detail re-rendered and disk still contained `[profiles.profile-c]` + `active_profile = "profile-c"`; second run answered `yes`, output showed `Profile "profile-c" deleted.` and `No active profile is currently set.`; disk no longer contained `profile-c` or `active_profile`. |
 | 5 Args toggle | PASS | PTY: `false` → `true` → `false`; config persists |
 | 6 Env add/edit/delete + invalid key | PASS | PTY rerun after review: `HTTP_PROXY` add printed `Saved env var HTTP_PROXY.`, edit printed `Updated HTTP_PROXY.`, delete printed `Deleted HTTP_PROXY.`, invalid `bad-key` printed `Environment variable name must start with A-Z or underscore`; disk contained neither `HTTP_PROXY` nor `bad-key`. |
-| 7 Show config | PASS | PTY: `Config file: <tmp>/.cc-profile`, `[args]`, API key `sk-x` in TOML output |
+| 7 Show config | PASS | PTY: `Config file: <tmp>/.cc-profile/config.toml`, `[args]`, API key `sk-x` in TOML output |
 | 8 Start Claude env precedence | PASS | `CC_PROFILE_CLAUDE_BIN` shim: `ANTHROPIC_API_KEY=sk-x` overrides global `custom-env-key`; `args=--dangerously-skip-permissions`; integration `launch::start_launches_claude_with_profile_envs_and_configured_args` |
 | 9 Missing active profile warning | PASS | PTY: missing-profile warning, guidance text, no `Start Claude` |
 | 10 Invalid TOML recovery | PASS | `cc-profile show` exit 1, message contains `Invalid TOML`; corrupt bytes preserved; no API key in stderr |
@@ -65,7 +65,7 @@ API key in errors/logs: Flow 10 grep for `sk-ant` in stderr — none. Launch fai
 
 ## Risks / Follow-ups
 
-- [x] **Plaintext API keys in `~/.cc-profile`** — Accepted v1 risk; keychain encryption out of scope.
+- [x] **Plaintext API keys in `~/.cc-profile/config.toml`** — Accepted v1 risk; keychain encryption out of scope.
 - [x] **Interactive manual automation** — `dialoguer` under `script`/`expect` is timing-sensitive; final evidence used direct inline PTY reruns for the previously brittle flows and no helper script is committed.
 - [x] **No `./scripts/ci.sh`** — Project relies on cargo fmt/clippy/nextest/doc until CI script is added.
 - [x] **PR / remote CI** — Branch pushed, PR opened, no `.github/workflows` directory exists, and `gh pr checks 1 --json name,state` reported CodeRabbit `SUCCESS`.

@@ -6,7 +6,7 @@ Verify interactive `cc-profile` behavior that is not fully covered by automated 
 
 ## Setup
 
-Use a temporary home directory so local `~/.cc-profile` is not touched:
+Use a temporary home directory so local `~/.cc-profile/config.toml` is not touched:
 
 ```bash
 export CC_PROFILE_MANUAL_HOME="$(mktemp -d)"
@@ -77,7 +77,7 @@ Expected: command exits successfully and no profile is active.
    - `API key: sk-ant-manual-secret` unmasked
    - `Start Claude` option present.
 
-Expected: profile is saved to `$HOME/.cc-profile` and active.
+Expected: profile is saved to `$HOME/.cc-profile/config.toml` and active.
 
 ## Flow 3 — List, View, Edit, Rename, and Set Active
 
@@ -134,7 +134,7 @@ Expected: deleting the active profile clears `active_profile`.
 6. Verify value becomes `false`.
 7. Select `Back`.
 
-Expected: `$HOME/.cc-profile` updates immediately after each toggle.
+Expected: `$HOME/.cc-profile/config.toml` updates immediately after each toggle.
 
 ## Flow 6 — Add, Edit, and Delete Env Vars
 
@@ -178,7 +178,7 @@ Expected: env keys use `[A-Z_][A-Z0-9_]*`, invalid lowercase or dash-containing 
 
 1. Select `Show config`.
 2. Verify output includes:
-   - `Config file: <temporary-home>/.cc-profile`
+   - `Config file: <temporary-home>/.cc-profile/config.toml`
    - `Active profile: <name or <none>>`
    - `[args]`
    - `[envs]` when envs exist
@@ -214,7 +214,8 @@ Expected: profile Claude env vars override duplicate global custom env vars.
 2. Create a config with a missing active profile:
 
    ```bash
-   cat > "$HOME/.cc-profile" <<'EOF'
+   mkdir -p "$HOME/.cc-profile"
+   cat > "$HOME/.cc-profile/config.toml" <<'EOF'
 version = 1
 active_profile = "missing-profile"
 EOF
@@ -239,7 +240,8 @@ Expected: user is guided to create or select a profile before launch.
 2. Corrupt the config file:
 
    ```bash
-   printf 'not valid toml = [' > "$HOME/.cc-profile"
+   mkdir -p "$HOME/.cc-profile"
+   printf 'not valid toml = [' > "$HOME/.cc-profile/config.toml"
    ```
 
 3. Run:
@@ -252,7 +254,7 @@ Expected: user is guided to create or select a profile before launch.
 5. Verify the corrupt file was not overwritten:
 
    ```bash
-   cat "$HOME/.cc-profile"
+   cat "$HOME/.cc-profile/config.toml"
    ```
 
 Expected: invalid TOML is reported and preserved.
