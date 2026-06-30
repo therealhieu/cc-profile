@@ -2,7 +2,7 @@
 
 use crate::config::{ConfigRepository, Profile};
 use crate::interactive;
-use crate::services::profiles;
+use crate::services::{launch, profiles};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -75,7 +75,7 @@ pub fn run() -> Result<()> {
         Some(Command::List) => list_profiles(&repository),
         Some(Command::Use { profile }) => use_profile(&repository, &profile),
         Some(Command::Show) => show_config(&repository),
-        Some(Command::Start) => command_not_ready("start", "Task 4"),
+        Some(Command::Start) => start_command(&repository),
         Some(Command::New {
             name,
             endpoint,
@@ -250,6 +250,7 @@ fn delete_profile_command(repository: &ConfigRepository, name: &str) -> Result<(
     Ok(())
 }
 
-fn command_not_ready(command: &str, task: &str) -> Result<()> {
-    anyhow::bail!("Command '{command}' is defined for CLI discovery and completed in {task}");
+fn start_command(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    launch::start_claude(&config)
 }

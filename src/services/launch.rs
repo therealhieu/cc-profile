@@ -54,8 +54,11 @@ pub fn build_command_spec(config: &Config) -> Result<CommandSpec> {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
+    // Override for integration tests / manual debugging; defaults to the real `claude` binary.
+    let program = std::env::var("CC_PROFILE_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
+
     Ok(CommandSpec {
-        program: "claude".to_string(),
+        program,
         args,
         envs,
     })
