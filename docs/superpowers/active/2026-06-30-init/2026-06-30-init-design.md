@@ -137,7 +137,7 @@ cc-profile
 Active profile: profile-a
 
 Endpoint: https://api.anthropic.com
-API key: sk-ant-••••••••••••abcd
+API key: sk-ant-...abcd
 Fable:  fable-model
 Opus:   opus-model
 Sonnet: sonnet-model
@@ -161,11 +161,7 @@ CUSTOM_FLAG=enabled
   Quit
 ```
 
-The API key should be masked by default. A helper function should show only a small suffix, for example:
-
-```text
-sk-ant-••••••••••••abcd
-```
+The API key should be shown as stored, without masking, so users can verify the exact credential selected by the active profile.
 
 If there is no active profile, the main screen should make that clear and guide the user to create or select one.
 
@@ -217,7 +213,7 @@ Example:
 Profile: profile-b
 
 Endpoint: https://api.example.com
-API key: sk-ant-••••••••••••xyz1
+API key: sk-ant-...xyz1
 Fable:  custom-fable
 Opus:   custom-opus
 Sonnet: custom-sonnet
@@ -466,7 +462,7 @@ HTTPS_PROXY = "http://localhost:7890"
 
 [profiles.profile-a]
 endpoint = "https://api.anthropic.com"
-api_key = "sk-ant-••••••••••••abcd"
+api_key = "sk-ant-...abcd"
 fable = "fable-model"
 opus = "opus-model"
 sonnet = "sonnet-model"
@@ -474,10 +470,9 @@ haiku = "haiku-model"
 
 ? Select an option
 > Back
-  Reveal API keys
 ```
 
-API keys should be masked by default. Revealing API keys should require an explicit action.
+API keys should be shown as stored. The CLI should not require an additional action to display profile API keys.
 
 ## Config File
 
@@ -918,7 +913,7 @@ Manual shell / local files
 ~/.cc-profile
   ├─ contains credentials in v1
   ├─ created with owner-only permissions on Unix
-  ├─ masked in normal display paths
+  ├─ shown in normal display paths
   └─ never written to logs or errors
 ```
 
@@ -926,7 +921,7 @@ API keys are stored in the config file in the first version. The CLI should warn
 
 The config file should be created with `0600` permissions on Unix. If an existing config file has broader permissions, the CLI should warn and offer to fix them before writing more secrets.
 
-Credentials should be masked in all normal interactive views. Revealing credentials should require an explicit user action, and the raw value should never appear in errors, debug output, logs, or test snapshots.
+Credentials should be shown as stored in normal interactive config views. The raw value should still never appear in errors, debug output, logs, or test snapshots.
 
 A future version can support storing credentials in the OS keychain using the `keyring` crate. The versioned config schema should make that migration backward-compatible.
 
@@ -946,7 +941,7 @@ Design acceptance criteria
 ```text
 Unit tests
   ├─ validation
-  ├─ masking
+  ├─ API key display
   ├─ config load/save
   └─ service mutations
 Integration tests
@@ -957,11 +952,11 @@ Manual checks
   └─ interactive dialoguer flows
 ```
 
-Unit tests should cover config path resolution, TOML serialization and deserialization, config version defaults, profile-name validation, environment-variable-name validation, endpoint and API key validation, API key masking, global args mapping, and domain service mutations.
+Unit tests should cover config path resolution, TOML serialization and deserialization, config version defaults, profile-name validation, environment-variable-name validation, endpoint and API key validation, API key display, global args mapping, and domain service mutations.
 
 Integration tests should use `assert_cmd`, `assert_fs`, and `predicates` to cover `cc-profile list`, `cc-profile use <profile>`, `cc-profile show`, and `cc-profile start`. Tests for `start` must not invoke a real `claude` binary; they should route through a command-construction seam or a test shim and assert the expected env vars and args.
 
-Manual verification should cover the interactive flows that are hard to assert through stdout alone: create profile, edit profile, rename active profile, delete active profile, toggle args, add/edit/delete env vars, reveal credentials explicitly, and recover from an invalid TOML config without overwriting it.
+Manual verification should cover the interactive flows that are hard to assert through stdout alone: create profile, edit profile, rename active profile, delete active profile, toggle args, add/edit/delete env vars, verify API keys are shown as stored, and recover from an invalid TOML config without overwriting it.
 
 Final verification for implementation should run:
 
@@ -979,7 +974,7 @@ If the repository adds `./scripts/ci.sh`, use that as the final verification com
 The first version is complete when the following behaviors work:
 
 - Running `cc-profile` opens interactive mode.
-- The main screen displays the active profile and masked config.
+- The main screen displays the active profile and unmasked config.
 - The user can list profiles.
 - The active profile is marked in the profile list.
 - Selecting a profile shows its config.
