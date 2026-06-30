@@ -1,5 +1,5 @@
 use crate::config::{Config, ConfigRepository, Profile};
-use crate::services::{launch, profiles};
+use crate::services::{claude_args, env_vars, launch, profiles};
 use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
 
@@ -254,16 +254,129 @@ fn apply_profile_field_update(profile: &mut Profile, field: &str, value: &str) {
     }
 }
 
-fn show_config_flow(_repository: &ConfigRepository) -> Result<()> {
+fn show_config_flow(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    println!("Current config\n");
+    println!("Config file: {}", repository.path().display());
+    println!(
+        "Active profile: {}\n",
+        config.active_profile.as_deref().unwrap_or("<none>")
+    );
+    print!("{}", toml::to_string_pretty(&config)?);
+    let _ = Select::new()
+        .with_prompt("Select an option")
+        .items(["Back"])
+        .default(0)
+        .interact()?;
     Ok(())
 }
 
-fn args_menu(_repository: &ConfigRepository) -> Result<()> {
+fn args_menu(repository: &ConfigRepository) -> Result<()> {
+    loop {
+        let config = repository.load()?;
+        println!("Args\n");
+        println!(
+            "--dangerously-skip-permissions: {}",
+            config.args.dangerously_skip_permissions
+        );
+        let options = ["Toggle dangerously-skip-permissions", "Back"];
+        let selected = Select::new()
+            .with_prompt("Select an option")
+            .items(options)
+            .default(0)
+            .interact()?;
+        match options[selected] {
+            "Toggle dangerously-skip-permissions" => {
+                let mut config = repository.load()?;
+                let enabled = claude_args::toggle_dangerously_skip_permissions(&mut config);
+                repository.save(&config)?;
+                println!("--dangerously-skip-permissions: {enabled}");
+            }
+            "Back" => return Ok(()),
+            _ => unreachable!("args option should be handled"),
+        }
+    }
+}
+
+fn envs_menu(repository: &ConfigRepository) -> Result<()> {
+    loop {
+        let config = repository.load()?;
+        println!("Custom envs\n");
+        for (key, value) in &config.envs {
+            println!("{key}={value}");
+        }
+        let options = ["Add env var", "Edit env var", "Delete env var", "Back"];
+        let selected = Select::new()
+            .with_prompt("Select an option")
+            .items(options)
+            .default(0)
+            .interact()?;
+        match options[selected] {
+            "Add env var" => {
+                let key: String = Input::new().with_prompt("Env key").interact_text()?;
+                let value: String = Input::new().with_prompt("Env value").interact_text()?;
+                let mut config = repository.load()?;
+                env_vars::set_env_var(&mut config, &key, &value)?;
+                repository.save(&config)?;
+                println!("Saved env var {key}.");
+            }
+            "Edit env var" => edit_env_flow(repository)?,
+            "Delete env var" => delete_env_flow(repository)?,
+            "Back" => return Ok(()),
+            _ => unreachable!("env option should be handled"),
+        }
+    }
+}
+
+fn edit_env_flow(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    let options = env_options(&config);
+    let selected = Select::new()
+        .with_prompt("Select env var")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    let key = &options[selected];
+    if key == "Back" {
+        return Ok(());
+    }
+    let value: String = Input::new().with_prompt("New value").interact_text()?;
+    let mut config = repository.load()?;
+    env_vars::set_env_var(&mut config, key, &value)?;
+    repository.save(&config)?;
+    println!("Updated {key}.");
     Ok(())
 }
 
-fn envs_menu(_repository: &ConfigRepository) -> Result<()> {
+fn delete_env_flow(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    let options = env_options(&config);
+    let selected = Select::new()
+        .with_prompt("Select env var")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    let key = &options[selected];
+    if key == "Back" {
+        return Ok(());
+    }
+    if Confirm::new()
+        .with_prompt(format!("Delete {key}?"))
+        .default(false)
+        .interact()?
+    {
+        let mut config = repository.load()?;
+        env_vars::delete_env_var(&mut config, key)?;
+        repository.save(&config)?;
+        println!("Deleted {key}.");
+    }
     Ok(())
+}
+
+fn env_options(config: &Config) -> Vec<String> {
+    let mut options: Vec<String> = config.envs.keys().cloned().collect();
+    options.push("Back".to_string());
+    options
 }
 
 #[cfg(test)]
@@ -321,6 +434,27 @@ mod tests {
         let options = profile_options(&config_with_active_profile());
 
         assert_eq!(options, vec!["profile-a  active", "Back"]);
+    }
+
+    #[test]
+    fn env_options_include_sorted_env_keys_and_back() {
+        let config = Config {
+            envs: BTreeMap::from([
+                ("HTTPS_PROXY".to_string(), "https://proxy".to_string()),
+                ("HTTP_PROXY".to_string(), "http://proxy".to_string()),
+            ]),
+            ..Default::default()
+        };
+
+        // BTreeMap key order: HTTPS_PROXY < HTTP_PROXY lexicographically ('S' before '_').
+        assert_eq!(
+            env_options(&config),
+            vec![
+                "HTTPS_PROXY".to_string(),
+                "HTTP_PROXY".to_string(),
+                "Back".to_string(),
+            ]
+        );
     }
 
     #[test]
