@@ -19,7 +19,7 @@ User shell
 User
   ↓
 cc-profile
-  ├─ reads ~/.cc-profile
+  ├─ reads ~/.cc-profile/config.toml
   ├─ selects active profile
   ├─ injects Claude Code env vars
   └─ launches claude with configured args
@@ -116,7 +116,7 @@ services
   ↓
 ConfigRepository
   ↓
-~/.cc-profile
+~/.cc-profile/config.toml
 ```
 
 The implementation should keep `dialoguer` prompts and `clap` parsing at the outer edge. Domain services should own validation and mutations. `ConfigRepository` should own config path resolution, TOML load/save, file permissions, and migration handling.
@@ -450,7 +450,7 @@ Example:
 ```text
 Current config
 
-Config file: ~/.cc-profile
+Config file: ~/.cc-profile/config.toml
 Active profile: profile-a
 
 [args]
@@ -476,13 +476,19 @@ API keys should be shown as stored. The CLI should not require an additional act
 
 ## Config File
 
-Default config path:
+Config directory:
 
 ```bash
-~/.cc-profile
+~/.cc-profile/
 ```
 
-The path is intentionally a fixed file in the user's home directory, not a platform config directory. In Rust, resolve it from the user's home directory and append `.cc-profile`.
+Config file:
+
+```bash
+~/.cc-profile/config.toml
+```
+
+The config directory is intentionally fixed under the user's home directory, not a platform config directory. In Rust, resolve it from the user's home directory with `home.join(".cc-profile")`, then store TOML at `config.toml` inside that directory.
 
 ### Config Schema
 
@@ -524,14 +530,14 @@ haiku = "custom-haiku"
 **Current state**
 
 ```text
-~/.cc-profile
+~/.cc-profile/config.toml
   └─ no version marker
 ```
 
 **Expected state**
 
 ```text
-~/.cc-profile
+~/.cc-profile/config.toml
   ├─ version = 1
   ├─ active_profile
   ├─ args
@@ -832,7 +838,7 @@ interactive.rs          dialoguer-driven menus and prompts only
 
 config/mod.rs           Public config module exports
 config/model.rs         Config, Profile, Args, and bon::Builder data types
-config/repository.rs    Resolve ~/.cc-profile, load/save TOML, file permissions, version checks
+config/repository.rs    Resolve ~/.cc-profile/config.toml, load/save TOML, file permissions, version checks
 config/validation.rs    Profile names, env var names, endpoint, API key, and model validation
 
 services/mod.rs         Public service module exports
@@ -910,12 +916,15 @@ Manual shell / local files
 **Expected state**
 
 ```text
-~/.cc-profile
-  ├─ contains credentials in v1
-  ├─ created with owner-only permissions on Unix
-  ├─ shown in normal display paths
-  └─ never written to logs or errors
+~/.cc-profile/
+  └─ config.toml
+      ├─ contains credentials in v1
+      ├─ created with owner-only file permissions (0600) on Unix
+      ├─ shown in normal display paths
+      └─ never written to logs or errors
 ```
+
+The config directory uses owner-only permissions (0700) on Unix after save.
 
 API keys are stored in the config file in the first version. The CLI should warn users that the config file contains secrets and should not be committed to version control.
 
