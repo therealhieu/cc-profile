@@ -1,7 +1,7 @@
-use crate::config::{Config, ConfigRepository};
-use crate::services::launch;
+use crate::config::{Config, ConfigRepository, Profile};
+use crate::services::{launch, profiles};
 use anyhow::Result;
-use dialoguer::Select;
+use dialoguer::{Confirm, Input, Select};
 
 /// Runs the prompt-based interactive menu.
 pub fn run() -> Result<()> {
@@ -77,7 +77,6 @@ fn active_profile_exists(config: &Config) -> bool {
         .is_some_and(|name| config.profiles.contains_key(name))
 }
 
-#[allow(dead_code)] // used by profile_menu in Part 4 Task 2
 fn profile_options(config: &Config) -> Vec<String> {
     let mut options: Vec<String> = config
         .profiles
@@ -94,12 +93,165 @@ fn profile_options(config: &Config) -> Vec<String> {
     options
 }
 
-fn profile_menu(_repository: &ConfigRepository) -> Result<()> {
+fn profile_menu(repository: &ConfigRepository) -> Result<()> {
+    loop {
+        let config = repository.load()?;
+        let options = profile_options(&config);
+        let selected = Select::new()
+            .with_prompt("Select a profile")
+            .items(&options)
+            .default(0)
+            .interact()?;
+        let selected_option = &options[selected];
+        if selected_option == "Back" {
+            return Ok(());
+        }
+        let profile_name = selected_option.trim_end_matches("  active").to_string();
+        profile_detail_menu(repository, &profile_name)?;
+    }
+}
+
+fn profile_detail_menu(repository: &ConfigRepository, name: &str) -> Result<()> {
+    loop {
+        let config = repository.load()?;
+        let Some(profile) = config.profiles.get(name) else {
+            return Ok(());
+        };
+        println!("Profile: {name}\n");
+        println!("Endpoint: {}", profile.endpoint);
+        println!("API key: {}", profile.api_key);
+        println!("Fable:  {}", profile.fable);
+        println!("Opus:   {}", profile.opus);
+        println!("Sonnet: {}", profile.sonnet);
+        println!("Haiku:  {}", profile.haiku);
+
+        let mut options = Vec::new();
+        if config.active_profile.as_deref() != Some(name) {
+            options.push("Set active");
+        }
+        options.extend(["Edit", "Delete", "Back"]);
+        let selected = Select::new()
+            .with_prompt("Select an option")
+            .items(&options)
+            .default(0)
+            .interact()?;
+        match options[selected] {
+            "Set active" => {
+                let mut config = repository.load()?;
+                profiles::set_active_profile(&mut config, name)?;
+                repository.save(&config)?;
+                println!("Profile \"{name}\" is now active.");
+            }
+            "Edit" => edit_profile_flow(repository, name)?,
+            "Delete" => {
+                if Confirm::new()
+                    .with_prompt(format!("Delete profile \"{name}\"? This cannot be undone."))
+                    .default(false)
+                    .interact()?
+                {
+                    let mut config = repository.load()?;
+                    let was_active = config.active_profile.as_deref() == Some(name);
+                    profiles::delete_profile(&mut config, name)?;
+                    repository.save(&config)?;
+                    println!("Profile \"{name}\" deleted.");
+                    if was_active {
+                        println!("No active profile is currently set.");
+                    }
+                    return Ok(());
+                }
+            }
+            "Back" => return Ok(()),
+            _ => unreachable!("profile option should be handled"),
+        }
+    }
+}
+
+fn new_profile_flow(repository: &ConfigRepository) -> Result<()> {
+    let name: String = Input::new().with_prompt("Profile name").interact_text()?;
+    let endpoint: String = Input::new().with_prompt("Endpoint").interact_text()?;
+    let api_key: String = Input::new().with_prompt("API key").interact_text()?;
+    let fable: String = Input::new().with_prompt("Fable model").interact_text()?;
+    let opus: String = Input::new().with_prompt("Opus model").interact_text()?;
+    let sonnet: String = Input::new().with_prompt("Sonnet model").interact_text()?;
+    let haiku: String = Input::new().with_prompt("Haiku model").interact_text()?;
+    let set_active = Confirm::new()
+        .with_prompt("Set as active profile?")
+        .default(true)
+        .interact()?;
+    let profile = Profile::builder()
+        .endpoint(endpoint)
+        .api_key(api_key)
+        .fable(fable)
+        .opus(opus)
+        .sonnet(sonnet)
+        .haiku(haiku)
+        .build();
+    let mut config = repository.load()?;
+    profiles::create_profile(&mut config, &name, profile, set_active)?;
+    repository.save(&config)?;
+    println!("Profile \"{name}\" saved.");
+    if set_active {
+        println!("Profile \"{name}\" is now active.");
+    }
     Ok(())
 }
 
-fn new_profile_flow(_repository: &ConfigRepository) -> Result<()> {
-    Ok(())
+fn edit_profile_flow(repository: &ConfigRepository, name: &str) -> Result<()> {
+    loop {
+        let options = [
+            "Profile name",
+            "Endpoint",
+            "API key",
+            "Fable model",
+            "Opus model",
+            "Sonnet model",
+            "Haiku model",
+            "Back",
+        ];
+        let selected = Select::new()
+            .with_prompt(format!("Edit profile: {name}"))
+            .items(options)
+            .default(0)
+            .interact()?;
+        let field = options[selected];
+        if field == "Back" {
+            return Ok(());
+        }
+        let mut config = repository.load()?;
+        if field == "Profile name" {
+            let new_name: String = Input::new()
+                .with_prompt("New profile name")
+                .interact_text()?;
+            profiles::rename_profile(&mut config, name, &new_name)?;
+            repository.save(&config)?;
+            println!("Profile \"{new_name}\" updated.");
+            return edit_profile_flow(repository, &new_name);
+        }
+        let mut profile = config
+            .profiles
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Profile '{}' does not exist", name))?;
+        let value: String = Input::new()
+            .with_prompt(format!("New {field}"))
+            .interact_text()?;
+        apply_profile_field_update(&mut profile, field, &value);
+        profiles::update_profile(&mut config, name, profile)?;
+        repository.save(&config)?;
+        println!("Profile \"{name}\" updated.");
+    }
+}
+
+fn apply_profile_field_update(profile: &mut Profile, field: &str, value: &str) {
+    match field {
+        "Endpoint" => profile.endpoint = value.to_string(),
+        "API key" => profile.api_key = value.to_string(),
+        "Fable model" => profile.fable = value.to_string(),
+        "Opus model" => profile.opus = value.to_string(),
+        "Sonnet model" => profile.sonnet = value.to_string(),
+        "Haiku model" => profile.haiku = value.to_string(),
+        _ => unreachable!("profile edit field should be known"),
+    }
 }
 
 fn show_config_flow(_repository: &ConfigRepository) -> Result<()> {
@@ -169,5 +321,22 @@ mod tests {
         let options = profile_options(&config_with_active_profile());
 
         assert_eq!(options, vec!["profile-a  active", "Back"]);
+    }
+
+    #[test]
+    fn apply_profile_field_update_changes_requested_field_only() {
+        let mut profile = Profile::builder()
+            .endpoint("https://api.anthropic.com".to_string())
+            .api_key("sk-ant-secret".to_string())
+            .fable("claude-fable-5".to_string())
+            .opus("claude-opus-4-8".to_string())
+            .sonnet("claude-sonnet-4-6".to_string())
+            .haiku("claude-haiku-4-5-20251001".to_string())
+            .build();
+
+        apply_profile_field_update(&mut profile, "Endpoint", "https://api.example.com");
+
+        assert_eq!(profile.endpoint, "https://api.example.com");
+        assert_eq!(profile.api_key, "sk-ant-secret");
     }
 }
