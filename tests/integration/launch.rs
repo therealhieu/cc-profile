@@ -6,7 +6,7 @@ use predicates::prelude::*;
 fn start_launches_claude_with_profile_envs_and_configured_args() {
     let temp = assert_fs::TempDir::new().expect("tempdir");
     let shim_output = temp.child("shim-output.txt");
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .write_str(
             r#"version = 1
 active_profile = "profile-a"

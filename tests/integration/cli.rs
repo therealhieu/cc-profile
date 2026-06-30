@@ -3,7 +3,7 @@ use assert_fs::prelude::*;
 use predicates::prelude::*;
 
 fn write_config(temp: &assert_fs::TempDir) {
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .write_str(
             r#"version = 1
 active_profile = "profile-a"
@@ -78,7 +78,7 @@ fn use_command_sets_active_profile() {
             "Profile \"profile-b\" is now active.",
         ));
 
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .assert(predicate::str::contains("active_profile = \"profile-b\""));
 }
 
@@ -94,6 +94,7 @@ fn show_prints_config_with_unmasked_api_key() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Config file:"))
+        .stdout(predicate::str::contains(".cc-profile/config.toml"))
         .stdout(predicate::str::contains("api_key = \"sk-ant-secret\""));
 }
 
@@ -129,7 +130,7 @@ fn new_command_creates_profile_and_optionally_sets_active() {
             "Profile \"profile-a\" is now active.",
         ));
 
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .assert(predicate::str::contains("active_profile = \"profile-a\""))
         .assert(predicate::str::contains("api_key = \"sk-ant-secret\""));
 }
@@ -154,7 +155,7 @@ fn edit_command_updates_profile_fields_and_rename_updates_active() {
         .success()
         .stdout(predicate::str::contains("Profile \"profile-c\" updated."));
 
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .assert(predicate::str::contains("active_profile = \"profile-c\""))
         .assert(predicate::str::contains(
             "endpoint = \"https://new.example\"",
@@ -177,7 +178,7 @@ fn delete_command_removes_profile_and_clears_active_when_needed() {
             "No active profile is currently set.",
         ));
 
-    temp.child(".cc-profile")
+    temp.child(".cc-profile/config.toml")
         .assert(predicate::str::contains("profile-a").not())
         .assert(predicate::str::contains("active_profile").not());
 }
