@@ -145,6 +145,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
+    fn cc_profile_dir(root: &Path) -> PathBuf {
+        root.join(".cc-profile")
+    }
+
     fn sample_config() -> Config {
         Config {
             active_profile: Some("profile-a".to_string()),
@@ -173,7 +177,7 @@ mod tests {
     #[test]
     fn save_creates_config_directory_before_writing_config_toml() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let config_path = temp.path().join(".cc-profile").join("config.toml");
+        let config_path = cc_profile_dir(temp.path()).join("config.toml");
         let repository = ConfigRepository::new(config_path.clone());
         let config = sample_config();
 
@@ -189,7 +193,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().expect("tempdir");
-        let dir = temp.path().join(".cc-profile");
+        let dir = cc_profile_dir(temp.path());
         fs::create_dir_all(&dir).expect("create dir");
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("set 0755");
         let config_path = dir.join("config.toml");
@@ -206,7 +210,7 @@ mod tests {
     #[test]
     fn save_errors_when_cc_profile_path_is_existing_file_and_preserves_contents() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let legacy = temp.path().join(".cc-profile");
+        let legacy = cc_profile_dir(temp.path());
         let legacy_contents = "version = 1\nactive_profile = \"legacy\"\n";
         fs::write(&legacy, legacy_contents).expect("write legacy file");
         let config_path = legacy.join("config.toml");
