@@ -31,7 +31,7 @@
 |---------|--------|
 | `cargo fmt --check` | PASS (`FMT_EXIT=0`) |
 | `cargo clippy --all-targets --all-features -- -D warnings` | PASS (`CLIPPY_EXIT=0`, no issues) |
-| `cargo nextest run --workspace` | PASS — 47 tests, 0 failed |
+| `cargo nextest run --workspace` | PASS — 51 tests, 0 failed |
 | `cargo test --doc --workspace` | PASS — 0 tests (no doc tests), exit 0 |
 | `./scripts/ci.sh` | Fallback: `./scripts/ci.sh not present; used cargo verification commands` |
 
