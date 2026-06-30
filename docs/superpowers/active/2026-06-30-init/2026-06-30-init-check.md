@@ -68,10 +68,10 @@ API key in errors/logs: Flow 10 grep for `sk-ant` in stderr — none. Launch fai
 - [x] **Plaintext API keys in `~/.cc-profile`** — Accepted v1 risk; keychain encryption out of scope.
 - [x] **Interactive manual automation** — `dialoguer` under `script`/`expect` is timing-sensitive; final evidence used direct inline PTY reruns for the previously brittle flows and no helper script is committed.
 - [x] **No `./scripts/ci.sh`** — Project relies on cargo fmt/clippy/nextest/doc until CI script is added.
-- [ ] **PR / remote CI** — Not part of this verification task; branch not pushed in this session.
+- [x] **PR / remote CI** — Branch pushed, PR opened, and `gh pr checks 1 --watch --fail-fast` reported no checks because no `.github/workflows` directory exists.
 
 ## PR / CI
 
-- [ ] Branch pushed to origin.
-- [ ] PR opened and linked here.
-- [ ] GitHub Actions workflows all green.
+- [x] Branch pushed to origin: `origin/init-design`.
+- [x] PR opened: https://github.com/therealhieu/cc-profile/pull/1
+- [x] GitHub Actions workflows: no workflows configured (`.github/workflows` absent; `gh pr checks 1 --watch --fail-fast` reported no checks).
