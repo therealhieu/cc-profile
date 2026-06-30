@@ -236,11 +236,11 @@ Config file: ~/.cc-profile/config.toml
    - Use `~/.cc-profile/` only when referring to the directory.
    - Update diagrams so the directory contains `config.toml`.
    - If Step 1 finds stale file-path wording in `2026-06-30-init-plan-2.md`, apply the same file-vs-directory rewrites there.
-4. Re-run `rg -n 'Config file: ~/.cc-profile(\b|$)|Default config path:|cat > "\$HOME/.cc-profile"' docs/superpowers/active/2026-06-30-init` and expect no stale matches in Task 3.1-owned files.
+4. Re-run `rg -n 'Config file: ~/.cc-profile(\s|$)|Default config path:|cat > "\$HOME/.cc-profile"' docs/superpowers/active/2026-06-30-init` and expect no stale matches in Task 3.1-owned files.
 5. Commit: `git commit -m "docs(config): document config toml path"`.
 
 **Validation (tester):**
-- `rg -n 'Config file: ~/.cc-profile(\b|$)' docs/superpowers/active/2026-06-30-init` returns no matches after both Phase 3 tasks land.
+- `rg -n 'Config file: ~/.cc-profile(\s|$)' docs/superpowers/active/2026-06-30-init` returns no matches after both Phase 3 tasks land.
 - Design doc has explicit `Config directory: ~/.cc-profile` and `Config file: ~/.cc-profile/config.toml` wording.
 - Plan file structure section names `src/config/repository.rs` as owning `~/.cc-profile/config.toml`.
 - No unrelated design scope was changed.
@@ -316,7 +316,7 @@ cargo test --doc --workspace
    - `cargo clippy --all-targets --all-features -- -D warnings`
    - `cargo nextest run --workspace`
    - `cargo test --doc --workspace`
-   - `rg -n 'cat > "\$HOME/.cc-profile"|printf .* > "\$HOME/.cc-profile"|temp.child\(".cc-profile"\)|Config file: ~/.cc-profile(\b|$)' src tests docs/superpowers/active/2026-06-30-init`
+   - `rg -n 'cat > "\$HOME/.cc-profile"|printf .* > "\$HOME/.cc-profile"|temp.child\(".cc-profile"\)|Config file: ~/.cc-profile(\s|$)' src tests docs/superpowers/active/2026-06-30-init`
 2. Expect all commands to pass after Phases 1–3; any failure caused by this path change is a verification failure.
 3. If a command fails due to this path change, make the smallest fix in the relevant code/test/doc file.
 4. Re-run the failed command, then run the full final verification list again and expect PASS.
