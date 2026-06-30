@@ -19,7 +19,7 @@ impl ConfigRepository {
 
     pub fn default_path() -> Result<PathBuf> {
         let home = dirs::home_dir().context("Could not determine home directory")?;
-        Ok(home.join(".cc-profile"))
+        Ok(home.join(".cc-profile").join("config.toml"))
     }
 
     /// Fallible default path resolution; plan and later callers use `ConfigRepository::default()?`.
@@ -59,11 +59,36 @@ impl ConfigRepository {
 
     pub fn save(&self, config: &Config) -> Result<()> {
         let contents = toml::to_string_pretty(config).context("Could not serialize config")?;
+        ensure_config_parent_directory(&self.path)?;
         fs::write(&self.path, contents)
             .with_context(|| format!("Could not write config file {}", self.path.display()))?;
         set_owner_only_permissions(&self.path)?;
         Ok(())
     }
+}
+
+fn ensure_config_parent_directory(config_path: &Path) -> Result<()> {
+    let Some(parent) = config_path.parent() else {
+        bail!(
+            "Invalid config path {}: missing parent directory",
+            config_path.display()
+        );
+    };
+
+    if parent.is_file() {
+        bail!(
+            "Cannot create config at {} because {} is a file, not a directory. \
+             Move or remove that file so cc-profile can use {} as a directory.",
+            config_path.display(),
+            parent.display(),
+            parent.display()
+        );
+    }
+
+    fs::create_dir_all(parent)
+        .with_context(|| format!("Could not create config directory {}", parent.display()))?;
+    set_owner_only_directory_permissions(parent)?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -98,6 +123,21 @@ fn set_owner_only_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn set_owner_only_directory_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_directory_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,9 +164,73 @@ mod tests {
     }
 
     #[test]
+    fn default_path_appends_cc_profile_config_toml_under_home() {
+        let home = dirs::home_dir().expect("home dir");
+        let path = ConfigRepository::default_path().expect("default path");
+        assert_eq!(path, home.join(".cc-profile").join("config.toml"));
+    }
+
+    #[test]
+    fn save_creates_config_directory_before_writing_config_toml() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join(".cc-profile").join("config.toml");
+        let repository = ConfigRepository::new(config_path.clone());
+        let config = sample_config();
+
+        repository.save(&config).expect("save should create layout");
+
+        assert!(config_path.is_file());
+        assert_eq!(repository.load().expect("load after save"), config);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_tightens_existing_config_directory_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path().join(".cc-profile");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("set 0755");
+        let config_path = dir.join("config.toml");
+        let repository = ConfigRepository::new(config_path);
+
+        repository
+            .save(&Config::default())
+            .expect("save should tighten dir perms");
+
+        let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn save_errors_when_cc_profile_path_is_existing_file_and_preserves_contents() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let legacy = temp.path().join(".cc-profile");
+        let legacy_contents = "version = 1\nactive_profile = \"legacy\"\n";
+        fs::write(&legacy, legacy_contents).expect("write legacy file");
+        let config_path = legacy.join("config.toml");
+        let repository = ConfigRepository::new(config_path);
+
+        let error = repository
+            .save(&Config::default())
+            .expect_err("save must fail when .cc-profile is a file");
+
+        let message = error.to_string();
+        assert!(
+            message.contains(".cc-profile"),
+            "error should mention .cc-profile, got: {message}"
+        );
+        assert_eq!(
+            fs::read_to_string(&legacy).expect("legacy file unchanged"),
+            legacy_contents
+        );
+    }
+
+    #[test]
     fn load_returns_default_config_when_file_is_missing() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let repository = ConfigRepository::new(temp.path().join(".cc-profile"));
+        let repository = ConfigRepository::new(temp.path().join("plain-config.toml"));
 
         let config = repository
             .load()
@@ -138,7 +242,7 @@ mod tests {
     #[test]
     fn save_then_load_round_trips_toml_config() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let repository = ConfigRepository::new(temp.path().join(".cc-profile"));
+        let repository = ConfigRepository::new(temp.path().join("plain-config.toml"));
         let config = sample_config();
 
         repository.save(&config).expect("save should succeed");
@@ -150,7 +254,7 @@ mod tests {
     #[test]
     fn load_rejects_newer_config_version_without_overwriting_file() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join(".cc-profile");
+        let path = temp.path().join("plain-config.toml");
         fs::write(&path, "version = 999\n").expect("write config");
         let repository = ConfigRepository::new(path.clone());
 
@@ -169,7 +273,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join(".cc-profile");
+        let path = temp.path().join("plain-config.toml");
         fs::write(&path, "version = 1\n").expect("write config");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
             .expect("set broad permissions");
