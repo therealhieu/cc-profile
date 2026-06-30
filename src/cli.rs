@@ -1,6 +1,8 @@
 //! Command-line interface for `cc-profile`: argument parsing and dispatch.
 
+use crate::config::ConfigRepository;
 use crate::interactive;
+use crate::services::profiles;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -67,16 +69,127 @@ pub enum Command {
 /// Parses process arguments and runs the matching handler or interactive mode.
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    let repository = ConfigRepository::default()?;
     match cli.command {
         None => interactive::run(),
+        Some(Command::List) => list_profiles(&repository),
+        Some(Command::Use { profile }) => use_profile(&repository, &profile),
+        Some(Command::Show) => show_config(&repository),
         Some(Command::Start) => command_not_ready("start", "Task 4"),
-        Some(Command::List) => command_not_ready("list", "Task 2"),
-        Some(Command::Use { .. }) => command_not_ready("use", "Task 2"),
-        Some(Command::Show) => command_not_ready("show", "Task 2"),
-        Some(Command::New { .. }) => command_not_ready("new", "Task 3"),
-        Some(Command::Edit { .. }) => command_not_ready("edit", "Task 3"),
-        Some(Command::Delete { .. }) => command_not_ready("delete", "Task 3"),
+        Some(Command::New {
+            name,
+            endpoint,
+            api_key,
+            fable,
+            opus,
+            sonnet,
+            haiku,
+            active,
+        }) => create_profile_command(
+            &repository,
+            NewProfileInput {
+                name,
+                endpoint,
+                api_key,
+                fable,
+                opus,
+                sonnet,
+                haiku,
+                active,
+            },
+        ),
+        Some(Command::Edit {
+            profile,
+            endpoint,
+            api_key,
+            fable,
+            opus,
+            sonnet,
+            haiku,
+            rename,
+        }) => edit_profile_command(
+            &repository,
+            EditProfileInput {
+                profile,
+                endpoint,
+                api_key,
+                fable,
+                opus,
+                sonnet,
+                haiku,
+                rename,
+            },
+        ),
+        Some(Command::Delete { profile }) => delete_profile_command(&repository, &profile),
     }
+}
+
+fn list_profiles(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    for name in config.profiles.keys() {
+        if config.active_profile.as_deref() == Some(name.as_str()) {
+            println!("{name}  active");
+        } else {
+            println!("{name}");
+        }
+    }
+    Ok(())
+}
+
+fn use_profile(repository: &ConfigRepository, name: &str) -> Result<()> {
+    let mut config = repository.load()?;
+    profiles::set_active_profile(&mut config, name)?;
+    repository.save(&config)?;
+    println!("Profile \"{name}\" is now active.");
+    Ok(())
+}
+
+fn show_config(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    println!("Current config\n");
+    println!("Config file: {}", repository.path().display());
+    println!(
+        "Active profile: {}\n",
+        config.active_profile.as_deref().unwrap_or("<none>")
+    );
+    print!("{}", toml::to_string_pretty(&config)?);
+    Ok(())
+}
+
+#[allow(dead_code)]
+struct NewProfileInput {
+    name: String,
+    endpoint: String,
+    api_key: String,
+    fable: String,
+    opus: String,
+    sonnet: String,
+    haiku: String,
+    active: bool,
+}
+
+#[allow(dead_code)]
+struct EditProfileInput {
+    profile: String,
+    endpoint: Option<String>,
+    api_key: Option<String>,
+    fable: Option<String>,
+    opus: Option<String>,
+    sonnet: Option<String>,
+    haiku: Option<String>,
+    rename: Option<String>,
+}
+
+fn create_profile_command(_repository: &ConfigRepository, _input: NewProfileInput) -> Result<()> {
+    command_not_ready("new", "Task 3")
+}
+
+fn edit_profile_command(_repository: &ConfigRepository, _input: EditProfileInput) -> Result<()> {
+    command_not_ready("edit", "Task 3")
+}
+
+fn delete_profile_command(_repository: &ConfigRepository, _name: &str) -> Result<()> {
+    command_not_ready("delete", "Task 3")
 }
 
 fn command_not_ready(command: &str, task: &str) -> Result<()> {
