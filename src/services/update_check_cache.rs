@@ -61,13 +61,16 @@ pub fn is_eligible_for_passive_check(
     let Ok(now_secs) = unix_secs(now) else {
         return true;
     };
-    now_secs.saturating_sub(cache.last_checked_unix) >= min_interval.as_secs()
+    now_secs < cache.last_checked_unix
+        || now_secs - cache.last_checked_unix >= min_interval.as_secs()
 }
 
 /// Reads cache from disk.
 ///
 /// Missing OR unparseable (e.g. legacy RFC3339 string) cache is treated as absent, so the
-/// next successful check rewrites it in the current format.
+/// next successful check rewrites it in the current format. This also silently masks genuine
+/// corruption (e.g. a truncated or hand-edited file), which is acceptable because the cache is
+/// disposable: it gets rewritten on the next successful check regardless of cause.
 pub fn read_cache(path: &Path) -> Result<Option<UpdateCheckCache>> {
     if !path.is_file() {
         return Ok(None);
@@ -118,6 +121,20 @@ mod tests {
         assert!(!is_eligible_for_passive_check(
             Some(&cache),
             recent,
+            PASSIVE_CHECK_MIN_INTERVAL
+        ));
+    }
+
+    #[test]
+    fn update_check_cache_future_timestamp_is_eligible() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let cache = UpdateCheckCache {
+            last_checked_unix: 1_700_000_000 + 3600,
+            latest_seen: None,
+        };
+        assert!(is_eligible_for_passive_check(
+            Some(&cache),
+            now,
             PASSIVE_CHECK_MIN_INTERVAL
         ));
     }
