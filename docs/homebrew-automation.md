@@ -47,7 +47,7 @@ brew style cc-profile.rb
 
 This workflow belongs in the **tap repo** (`therealhieu/homebrew-tap`), not this repo. Add it
 as `.github/workflows/livecheck.yml` there. It runs on a schedule and fails if the formula's
-`sha256`/`version` drift from the latest `cc-profile` release, catching a missed or broken
+`version` lags the latest `cc-profile` release, catching a missed or broken
 `bump-formula` run.
 
 ```yaml
@@ -67,7 +67,7 @@ jobs:
         run: |
           brew livecheck --formula Formula/cc-profile.rb --json --quiet > livecheck.json
           cat livecheck.json
-          if jq -e '.[0].version.current != .[0].version.latest' livecheck.json >/dev/null; then
+          if jq -e 'length == 0 or (.[0].version.current != .[0].version.latest)' livecheck.json >/dev/null; then
             echo "cc-profile formula is outdated" >&2
             exit 1
           fi
