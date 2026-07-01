@@ -18,6 +18,7 @@ Jobs (default: run all in order):
   publish-dry-run  cargo publish --dry-run
   render-formula   render Homebrew formula from SHA256SUMS
   release-workflow  check release.yml wires up the bump-formula job
+  readme-homebrew  check README documents the generated tap formula
 
 Examples:
   ./scripts/ci.sh fmt test
@@ -60,7 +61,12 @@ job_release_workflow() {
   ./tests/release_workflow_test.sh
 }
 
-ALL_JOBS=(fmt clippy test package publish-dry-run render-formula release-workflow)
+job_readme_homebrew() {
+  echo "==> readme-homebrew"
+  ./tests/readme_homebrew_test.sh
+}
+
+ALL_JOBS=(fmt clippy test package publish-dry-run render-formula release-workflow readme-homebrew)
 
 run_job() {
   case "${1}" in
@@ -71,6 +77,7 @@ run_job() {
     publish-dry-run) job_publish_dry_run ;;
     render-formula) job_render_formula ;;
     release-workflow) job_release_workflow ;;
+    readme-homebrew) job_readme_homebrew ;;
     *)
       echo "Unknown job: ${1}" >&2
       usage >&2

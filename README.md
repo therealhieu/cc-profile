@@ -154,12 +154,10 @@ Run the same checks as CI locally:
 
 **Releases** — pushing a tag `vX.Y.Z` matching `Cargo.toml` `version` triggers [`release.yml`](.github/workflows/release.yml): it runs CI, builds macOS/Linux archives, uploads them plus `SHA256SUMS` to a GitHub Release, and publishes to crates.io. Requires the `CARGO_REGISTRY_TOKEN` Actions secret.
 
-**Homebrew formula** — the canonical formula lives in [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap); `Formula/cc-profile.rb` here is a source-build reference. Validate on macOS with:
+**Homebrew formula** — the tap formula at [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) is generated from [`packaging/homebrew/cc-profile.rb.tmpl`](packaging/homebrew/cc-profile.rb.tmpl) on each release and installs prebuilt archives (no source build). CI renders the template, validates it with `brew style` and `brew audit --online`, and runs a real `brew install` before pushing it to the tap. To render and lint locally:
 
 ```bash
-brew install --build-from-source therealhieu/tap/cc-profile
-brew test cc-profile
-brew audit --strict --online therealhieu/tap/cc-profile
+scripts/render-formula.sh <version> <SHA256SUMS> > cc-profile.rb && brew style cc-profile.rb
 ```
 
 **Testing internals** — `tests/install_platform_mapping_test.sh` checks the standalone platform mapping. Integration tests can point `CC_PROFILE_CLAUDE_BIN` at a test shim ([`tests/fixtures/cc-profile-test-claude.rs`](tests/fixtures/cc-profile-test-claude.rs)) instead of the real `claude` binary; unset it afterward.
