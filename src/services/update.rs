@@ -11,8 +11,9 @@ use crate::services::self_replace::{
     smoke_test_binary, verify_archive_sha256,
 };
 use crate::services::update_check_cache::{
-    PASSIVE_CHECK_MIN_INTERVAL, UpdateCheckCache, default_cache_path, format_rfc3339_utc,
-    is_eligible_for_passive_check, passive_checks_disabled_by_env, read_cache, write_cache,
+    PASSIVE_CHECK_MIN_INTERVAL, UpdateCheckCache, default_cache_path,
+    is_eligible_for_passive_check, passive_checks_disabled_by_env, read_cache, unix_secs,
+    write_cache,
 };
 use anyhow::{Context, Result, bail};
 use dialoguer::Confirm;
@@ -184,13 +185,13 @@ pub fn run_passive_update_check_injected(
         return Ok(());
     }
     let outcome = lookup();
-    let stamp = format_rfc3339_utc(now)?;
+    let stamp = unix_secs(now)?;
     match outcome {
         VersionCheckOutcome::UpdateAvailable { latest } => {
             write_cache(
                 &path,
                 &UpdateCheckCache {
-                    last_checked_at: stamp,
+                    last_checked_unix: stamp,
                     latest_seen: Some(latest.clone()),
                 },
             )?;
@@ -200,7 +201,7 @@ pub fn run_passive_update_check_injected(
             write_cache(
                 &path,
                 &UpdateCheckCache {
-                    last_checked_at: stamp,
+                    last_checked_unix: stamp,
                     latest_seen: None,
                 },
             )?;
@@ -839,7 +840,7 @@ exit 0
         write_cache(
             &path,
             &UpdateCheckCache {
-                last_checked_at: format_rfc3339_utc(SystemTime::now()).expect("stamp"),
+                last_checked_unix: unix_secs(SystemTime::now()).expect("stamp"),
                 latest_seen: None,
             },
         )
@@ -873,5 +874,6 @@ exit 0
         .expect("passive");
         let cache = read_cache(&path).expect("read").expect("cache");
         assert_eq!(cache.latest_seen.as_deref(), Some("0.2.0"));
+        assert_eq!(cache.last_checked_unix, unix_secs(now).expect("stamp"));
     }
 }
