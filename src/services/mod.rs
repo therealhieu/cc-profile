@@ -8,4 +8,5 @@ pub mod env_vars;
 pub mod install_method;
 pub mod launch;
 pub mod profiles;
+pub mod release;
 pub mod update;
