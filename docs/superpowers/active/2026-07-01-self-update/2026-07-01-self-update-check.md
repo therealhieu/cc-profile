@@ -50,7 +50,7 @@ Use this checklist after implementation. Do not mark an item complete until veri
 
 ## Release and PR
 
-- [ ] PR is open.
-- [ ] GitHub Actions CI is green.
+- [x] PR is open.
+- [x] GitHub Actions CI is green.
 - [x] Release workflow has been tested or reviewed with required secrets documented.
-- [ ] Homebrew formula has been tested locally or marked with exact reason it could not run. *(Same as Decisions: tap not exercised in this worktree; template in `Formula/cc-profile.rb` and README section.)*
+- [x] Homebrew formula has been tested locally or marked with exact reason it could not run. *(Same as Decisions: tap not exercised in this worktree; template in `Formula/cc-profile.rb` and README section.)*
