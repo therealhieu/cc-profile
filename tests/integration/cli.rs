@@ -193,3 +193,19 @@ fn delete_command_removes_profile_and_clears_active_when_needed() {
         .assert(predicate::str::contains("profile-a").not())
         .assert(predicate::str::contains("active_profile").not());
 }
+
+#[test]
+fn update_check_succeeds_without_profile_config() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    let version = env!("CARGO_PKG_VERSION");
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .env("CC_PROFILE_UPDATE_LOOKUP", "stub-current")
+        .args(["update", "--check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(version))
+        .stdout(predicate::str::contains("up to date"));
+}

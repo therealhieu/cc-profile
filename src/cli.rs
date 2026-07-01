@@ -2,7 +2,7 @@
 
 use crate::config::{ConfigRepository, Profile};
 use crate::interactive;
-use crate::services::{launch, profiles};
+use crate::services::{launch, profiles, update};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -65,11 +65,20 @@ pub enum Command {
     Delete {
         profile: String,
     },
+    Update {
+        #[arg(long)]
+        check: bool,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 /// Parses process arguments and runs the matching handler or interactive mode.
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Command::Update { check, yes }) = cli.command {
+        return update_command(check, yes);
+    }
     let repository = ConfigRepository::default()?;
     match cli.command {
         None => interactive::run(),
@@ -122,7 +131,16 @@ pub fn run() -> Result<()> {
             },
         ),
         Some(Command::Delete { profile }) => delete_profile_command(&repository, &profile),
+        Some(Command::Update { .. }) => unreachable!("update dispatched above"),
     }
+}
+
+fn update_command(check: bool, yes: bool) -> Result<()> {
+    let _ = yes;
+    update::run_update(update::UpdateOptions {
+        check_only: check,
+        skip_confirm: yes,
+    })
 }
 
 fn list_profiles(repository: &ConfigRepository) -> Result<()> {
