@@ -119,6 +119,43 @@ jobs:
             release-assets/cc-profile-v*.tar.gz \
             release-assets/SHA256SUMS
 
+  bump-formula:
+    name: Bump Homebrew tap formula
+    needs: release
+    runs-on: macos-latest        # brew preinstalled
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download SHA256SUMS
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release download "${GITHUB_REF_NAME}" -p SHA256SUMS -D .
+      - name: Render formula
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          bash scripts/render-formula.sh "${version}" SHA256SUMS > cc-profile.rb
+      - name: Lint formula (gate)
+        run: |
+          set -euo pipefail
+          brew style cc-profile.rb          # formatting/rubocop
+          brew audit --formula cc-profile.rb # structural: url/sha256/livecheck resolvable
+      - name: Push to tap
+        env: { GH_TOKEN: "${{ secrets.HOMEBREW_TAP_TOKEN }}" }
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/therealhieu/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp cc-profile.rb tap/Formula/cc-profile.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cc-profile.rb
+          git diff --cached --quiet || git commit -m "cc-profile ${GITHUB_REF_NAME#v}"
+          git push
+      - name: Smoke test install (non-blocking)
+        continue-on-error: true
+        run: brew install --formula ./cc-profile.rb && cc-profile --version
+
   publish:
     name: Publish to crates.io
     needs: build

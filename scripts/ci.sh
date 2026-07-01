@@ -17,6 +17,7 @@ Jobs (default: run all in order):
   package        cargo package --list
   publish-dry-run  cargo publish --dry-run
   render-formula   render Homebrew formula from SHA256SUMS
+  release-workflow  check release.yml wires up the bump-formula job
 
 Examples:
   ./scripts/ci.sh fmt test
@@ -54,7 +55,12 @@ job_render_formula() {
   ./tests/render_formula_test.sh
 }
 
-ALL_JOBS=(fmt clippy test package publish-dry-run render-formula)
+job_release_workflow() {
+  echo "==> release-workflow"
+  ./tests/release_workflow_test.sh
+}
+
+ALL_JOBS=(fmt clippy test package publish-dry-run render-formula release-workflow)
 
 run_job() {
   case "${1}" in
@@ -64,6 +70,7 @@ run_job() {
     package) job_package ;;
     publish-dry-run) job_publish_dry_run ;;
     render-formula) job_render_formula ;;
+    release-workflow) job_release_workflow ;;
     *)
       echo "Unknown job: ${1}" >&2
       usage >&2
