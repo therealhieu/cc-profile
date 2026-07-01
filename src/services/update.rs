@@ -442,11 +442,34 @@ fn github_http_agent() -> &'static Agent {
 }
 
 fn fetch_github_release_json(url: &str) -> Result<String> {
+    #[cfg(debug_assertions)]
+    if let Ok(path) = std::env::var("CC_PROFILE_UPDATE_RELEASE_JSON_PATH") {
+        if !path.trim().is_empty() {
+            return std::fs::read_to_string(&path)
+                .with_context(|| format!("read release JSON fixture {path}"));
+        }
+    }
     let bytes = fetch_github_release_bytes(url)?;
     String::from_utf8(bytes).context("release metadata response must be UTF-8")
 }
 
 fn fetch_github_release_bytes(url: &str) -> Result<Vec<u8>> {
+    #[cfg(debug_assertions)]
+    if let Ok(root) = std::env::var("CC_PROFILE_UPDATE_FIXTURE_DIR") {
+        if !root.trim().is_empty() {
+            let basename = url
+                .rsplit('/')
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(url);
+            let candidate = Path::new(&root).join(basename);
+            if candidate.is_file() {
+                return std::fs::read(&candidate).with_context(|| {
+                    format!("read release fixture {}", candidate.display())
+                });
+            }
+        }
+    }
     let mut response = github_http_agent()
         .get(url)
         .header("User-Agent", "cc-profile")
