@@ -73,21 +73,21 @@ Release after this plan:
 | One formula or two | Template in this repo = source of truth; tap file generated | Kills drift; `bump-formula` overwrites the tap file every release |
 | Bump mechanism | Custom `render-formula.sh` from `SHA256SUMS` in `release.yml` | `SHA256SUMS` already has all 3 platform hashes; deterministic; avoids `dawidd6/action-homebrew-bump-formula` multi-platform-sha256 friction |
 | Formula install method | Download prebuilt per-platform archives (`on_macos`/`on_arm`/`on_intel`/`on_linux`) | Reuses existing build artifacts; seconds vs multi-minute `cargo install` |
-| Tap update style | Direct push, gated by `brew style` before push | Solo tap; full automation; lint gate prevents pushing an invalid formula |
+| Tap update style | Direct push, gated by `brew style` (+ `brew audit --online` after release exists) before push | Solo tap; full automation; `brew style` catches format, `brew audit --online` catches structural/livecheck/URL errors once the archives are live |
 | Cross-repo auth | Fine-grained PAT `HOMEBREW_TAP_TOKEN` (contents:write on homebrew-tap) | `GITHUB_TOKEN` cannot push to a different repo |
 | Pre-release local validation | Unit tests on render script + `brew style` on rendered output | A prebuilt-archive formula can't be installed before the release archive exists; validate the generator, not a live install |
 
 ## Testing
 
-- **Framework:** bash test script (mirrors existing `tests/install_platform_mapping_test.sh`), run via `cargo test` is N/A here — invoked directly and wired into `scripts/ci.sh` is out of scope; run through the test file directly.
+- **Framework:** bash test script (mirrors existing `tests/install_platform_mapping_test.sh`), invoked directly and **wired into `scripts/ci.sh`** as a new `render-formula` job so the `verify` workflow job covers it. The renderer is the load-bearing component of every release, so a regression must fail CI, not surface mid-release.
 - **TDD cycle:** write failing bash test → run (FAIL) → implement `render-formula.sh` → run (PASS) → commit.
 - **Coverage target:** every platform target in `release.yml`'s matrix maps to the correct `sha256` in the rendered formula; version substitution correct; missing-hash input fails loudly.
-- **Test files:** `tests/render_formula_test.sh`, fixture `tests/fixtures/SHA256SUMS.sample`.
+- **Test files:** `tests/render_formula_test.sh`, fixture `tests/fixtures/SHA256SUMS.sample` (filenames embed the test version `v1.2.3`, e.g. `cc-profile-v1.2.3-aarch64-apple-darwin.tar.gz`).
 
 ## Success Criteria
 
 - [ ] `scripts/render-formula.sh <version> <SHA256SUMS>` emits a valid formula with correct version + all 3 platform `sha256` values in the right `on_*` blocks.
-- [ ] Rendered formula passes `brew style` (stdin or temp file).
+- [ ] Rendered formula passes `brew style` (format) and `brew audit --formula` (structure: url/sha256/livecheck resolvable, since the release archives already exist by this job).
 - [ ] `release.yml` has a `bump-formula` job that runs only on tag push, renders from the release's `SHA256SUMS`, and pushes to `homebrew-tap` using `HOMEBREW_TAP_TOKEN`.
 - [ ] In-repo `Formula/cc-profile.rb` is removed; `packaging/homebrew/cc-profile.rb.tmpl` is the source of truth.
 - [ ] README "Homebrew formula" section reflects generated-from-template + prebuilt-archive install.
@@ -150,7 +150,7 @@ class CcProfile < Formula
   end
 
   livecheck do
-    url :stable
+    url :homepage
     strategy :github_latest
   end
 
@@ -249,6 +249,7 @@ printf '%s\n' "${rendered}"
     name: Bump Homebrew tap formula
     needs: release
     runs-on: macos-latest        # brew preinstalled
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
       - name: Download SHA256SUMS
@@ -258,14 +259,18 @@ printf '%s\n' "${rendered}"
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          scripts/render-formula.sh "${version}" SHA256SUMS > cc-profile.rb
+          bash scripts/render-formula.sh "${version}" SHA256SUMS > cc-profile.rb
       - name: Lint formula (gate)
-        run: brew style cc-profile.rb
+        run: |
+          set -euo pipefail
+          brew style cc-profile.rb          # formatting/rubocop
+          brew audit --formula cc-profile.rb # structural: url/sha256/livecheck resolvable
       - name: Push to tap
         env: { GH_TOKEN: "${{ secrets.HOMEBREW_TAP_TOKEN }}" }
         run: |
           set -euo pipefail
           git clone "https://x-access-token:${GH_TOKEN}@github.com/therealhieu/homebrew-tap.git" tap
+          mkdir -p tap/Formula
           cp cc-profile.rb tap/Formula/cc-profile.rb
           cd tap
           git config user.name "github-actions[bot]"
@@ -273,11 +278,14 @@ printf '%s\n' "${rendered}"
           git add Formula/cc-profile.rb
           git diff --cached --quiet || git commit -m "cc-profile ${GITHUB_REF_NAME#v}"
           git push
+      - name: Smoke test install (non-blocking)
+        continue-on-error: true
+        run: brew install --formula ./cc-profile.rb && cc-profile --version
 ```
 
 **Steps (run by implementer):**
 
-1. Write a failing check: a lightweight assertion (grep/yaml-lint in `tests/render_formula_test.sh` or a new `tests/release_workflow_test.sh`) that `release.yml` contains a `bump-formula:` job with `needs: release`, a `brew style` step, and references `HOMEBREW_TAP_TOKEN` + `render-formula.sh`.
+1. Write a failing check: a lightweight assertion (grep/yaml-lint in `tests/render_formula_test.sh` or a new `tests/release_workflow_test.sh`) that `release.yml` contains a `bump-formula:` job with `needs: release`, a `brew style` + `brew audit` gate step, and references `HOMEBREW_TAP_TOKEN` + `render-formula.sh`.
 2. Run test — expect FAIL (job absent).
 3. Add the job as previewed.
 4. Run test — expect PASS. Validate YAML parses (`yq`/python `yaml.safe_load` on the file).
@@ -290,7 +298,7 @@ printf '%s\n' "${rendered}"
 - Confirm (by reading) the job is tag-gated (inherits the `on: push: tags` trigger; add an `if: startsWith(github.ref, 'refs/tags/')` guard since `workflow_dispatch` has no tag).
 
 **Phase 2 End Review:**
-- `spec-reviewer` → Success Criteria 3 met; matches Design Decisions (render-from-SHA256SUMS, direct push, style gate); tag-gating correct.
+- `spec-reviewer` → Success Criteria 3 met; matches Design Decisions (render-from-SHA256SUMS, direct push, style+audit gate); tag-gating correct.
 - `code-quality-reviewer` → workflow style matches existing jobs, secret handling safe, no `workflow_dispatch` crash path.
 - Fix findings: `implementer` + `tester`, max 2 iterations, then move to next phase.
 - **Gate:** pass to next phase after max 2 fix iterations.
