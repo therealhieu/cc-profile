@@ -159,9 +159,7 @@ fn profile_detail_menu(repository: &ConfigRepository, name: &str) -> Result<()> 
             .interact()?;
         match options[selected] {
             "Set active" => {
-                let mut config = repository.load()?;
-                profiles::set_active_profile(&mut config, name)?;
-                repository.save(&config)?;
+                repository.update(|config| profiles::set_active_profile(config, name))?;
                 println!("Profile \"{name}\" is now active.");
             }
             "Edit" => edit_profile_flow(repository, name)?,
@@ -171,10 +169,11 @@ fn profile_detail_menu(repository: &ConfigRepository, name: &str) -> Result<()> 
                     .default(false)
                     .interact()?
                 {
-                    let mut config = repository.load()?;
-                    let was_active = config.active_profile.as_deref() == Some(name);
-                    profiles::delete_profile(&mut config, name)?;
-                    repository.save(&config)?;
+                    let mut was_active = false;
+                    repository.update(|config| {
+                        was_active = config.active_profile.as_deref() == Some(name);
+                        profiles::delete_profile(config, name)
+                    })?;
                     println!("Profile \"{name}\" deleted.");
                     if was_active {
                         println!("No active profile is currently set.");
@@ -208,9 +207,7 @@ fn new_profile_flow(repository: &ConfigRepository) -> Result<()> {
         .sonnet(sonnet)
         .haiku(haiku)
         .build();
-    let mut config = repository.load()?;
-    profiles::create_profile(&mut config, &name, profile, set_active)?;
-    repository.save(&config)?;
+    repository.update(|config| profiles::create_profile(config, &name, profile, set_active))?;
     println!("Profile \"{name}\" saved.");
     if set_active {
         println!("Profile \"{name}\" is now active.");
@@ -239,27 +236,26 @@ fn edit_profile_flow(repository: &ConfigRepository, name: &str) -> Result<()> {
         if field == "Back" {
             return Ok(());
         }
-        let mut config = repository.load()?;
         if field == "Profile name" {
             let new_name: String = Input::new()
                 .with_prompt("New profile name")
                 .interact_text()?;
-            profiles::rename_profile(&mut config, name, &new_name)?;
-            repository.save(&config)?;
+            repository.update(|config| profiles::rename_profile(config, name, &new_name))?;
             println!("Profile \"{new_name}\" updated.");
             return edit_profile_flow(repository, &new_name);
         }
-        let mut profile = config
-            .profiles
-            .get(name)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Profile '{}' does not exist", name))?;
         let value: String = Input::new()
             .with_prompt(format!("New {field}"))
             .interact_text()?;
-        apply_profile_field_update(&mut profile, field, &value);
-        profiles::update_profile(&mut config, name, profile)?;
-        repository.save(&config)?;
+        repository.update(|config| {
+            let mut profile = config
+                .profiles
+                .get(name)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Profile '{}' does not exist", name))?;
+            apply_profile_field_update(&mut profile, field, &value);
+            profiles::update_profile(config, name, profile)
+        })?;
         println!("Profile \"{name}\" updated.");
     }
 }
@@ -311,9 +307,11 @@ fn args_menu(repository: &ConfigRepository) -> Result<()> {
             .interact()?;
         match options[selected] {
             "Toggle dangerously-skip-permissions" => {
-                let mut config = repository.load()?;
-                let enabled = claude_args::toggle_dangerously_skip_permissions(&mut config);
-                repository.save(&config)?;
+                let mut enabled = false;
+                repository.update(|config| {
+                    enabled = claude_args::toggle_dangerously_skip_permissions(config);
+                    Ok(())
+                })?;
                 println!("--dangerously-skip-permissions: {enabled}");
             }
             "Back" => return Ok(()),
@@ -340,9 +338,7 @@ fn envs_menu(repository: &ConfigRepository) -> Result<()> {
             "Add env var" => {
                 let key: String = Input::new().with_prompt("Env key").interact_text()?;
                 let value: String = Input::new().with_prompt("Env value").interact_text()?;
-                let mut config = repository.load()?;
-                env_vars::set_env_var(&mut config, &key, &value)?;
-                repository.save(&config)?;
+                repository.update(|config| env_vars::set_env_var(config, &key, &value))?;
                 println!("Saved env var {key}.");
             }
             "Edit env var" => edit_env_flow(repository)?,
@@ -366,9 +362,7 @@ fn edit_env_flow(repository: &ConfigRepository) -> Result<()> {
         return Ok(());
     }
     let value: String = Input::new().with_prompt("New value").interact_text()?;
-    let mut config = repository.load()?;
-    env_vars::set_env_var(&mut config, key, &value)?;
-    repository.save(&config)?;
+    repository.update(|config| env_vars::set_env_var(config, key, &value))?;
     println!("Updated {key}.");
     Ok(())
 }
@@ -390,9 +384,7 @@ fn delete_env_flow(repository: &ConfigRepository) -> Result<()> {
         .default(false)
         .interact()?
     {
-        let mut config = repository.load()?;
-        env_vars::delete_env_var(&mut config, key)?;
-        repository.save(&config)?;
+        repository.update(|config| env_vars::delete_env_var(config, key))?;
         println!("Deleted {key}.");
     }
     Ok(())
