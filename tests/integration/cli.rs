@@ -35,6 +35,17 @@ haiku = "custom-haiku"
 }
 
 #[test]
+fn version_prints_package_version() {
+    let version = env!("CARGO_PKG_VERSION");
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!("cc-profile {version}")));
+}
+
+#[test]
 fn help_lists_core_commands() {
     let mut command = Command::cargo_bin("cc-profile").expect("binary exists");
 

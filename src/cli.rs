@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(
     name = "cc-profile",
+    version,
     about = "Profile Management for Claude Code Endpoints and Models"
 )]
 pub struct Cli {
