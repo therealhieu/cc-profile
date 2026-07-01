@@ -1,5 +1,6 @@
 //! How the running `cc-profile` binary was installed.
 
+use crate::services::receipt::receipt_file_is_standalone;
 use std::path::{Path, PathBuf};
 
 /// Detected installation channel for update delegation.
@@ -80,13 +81,6 @@ fn is_under_cargo_bin(exe: &Path, ctx: &InstallPathContext) -> bool {
         return false;
     };
     exe.starts_with(&cargo_bin)
-}
-
-fn receipt_file_is_standalone(path: &Path) -> bool {
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    contents.contains("method = \"standalone\"")
 }
 
 #[cfg(test)]

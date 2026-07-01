@@ -70,16 +70,21 @@ pub fn parse_latest_release_json(body: &str) -> Result<GitHubRelease> {
     serde_json::from_str(body).context("invalid GitHub release JSON")
 }
 
+/// Returns true when `name` is a release archive for `target_triple` (`cc-profile-…-{triple}.tar.gz`).
+pub fn is_release_archive_asset_name(name: &str, target_triple: &str) -> bool {
+    let suffix = format!("-{target_triple}.tar.gz");
+    name.starts_with("cc-profile-") && name.ends_with(&suffix)
+}
+
 /// Selects the release archive asset name for a Rust target triple.
 pub fn select_asset_name_for_target(
     release: &GitHubRelease,
     target_triple: &str,
 ) -> Option<String> {
-    let suffix = format!("-{target_triple}.tar.gz");
     release
         .assets
         .iter()
-        .find(|a| a.name.ends_with(&suffix))
+        .find(|a| is_release_archive_asset_name(&a.name, target_triple))
         .map(|a| a.name.clone())
 }
 
@@ -94,7 +99,9 @@ pub fn fetch_latest_tag(get_json: impl FnOnce(&str) -> Result<String>) -> Result
 }
 
 /// Fetches and parses the latest GitHub release document.
-pub fn fetch_latest_release(get_json: impl FnOnce(&str) -> Result<String>) -> Result<GitHubRelease> {
+pub fn fetch_latest_release(
+    get_json: impl FnOnce(&str) -> Result<String>,
+) -> Result<GitHubRelease> {
     let body = get_json(GITHUB_LATEST_RELEASE_URL)?;
     parse_latest_release_json(&body)
 }
@@ -200,6 +207,21 @@ mod tests {
         assert_eq!(release.tag_name, "v0.2.0");
         let name = select_asset_name_for_target(&release, "aarch64-apple-darwin").expect("asset");
         assert_eq!(name, "cc-profile-v0.2.0-aarch64-apple-darwin.tar.gz");
+    }
+
+    #[test]
+    fn select_asset_rejects_name_without_cc_profile_prefix() {
+        let json = r#"{
+            "tag_name": "v0.2.0",
+            "assets": [
+                {"name": "evil-v0.2.0-aarch64-apple-darwin.tar.gz", "browser_download_url": "https://example.com/evil"}
+            ]
+        }"#;
+        let release = parse_latest_release_json(json).expect("parse");
+        assert_eq!(
+            select_asset_name_for_target(&release, "aarch64-apple-darwin"),
+            None
+        );
     }
 
     #[test]

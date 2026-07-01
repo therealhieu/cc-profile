@@ -3,10 +3,12 @@
 use crate::services::install_method::{
     InstallMethod, InstallPathContext, detect_from_exe_path_with_context,
 };
+use crate::services::receipt::default_receipt_path_from_env;
 use crate::services::release::{self, GitHubRelease, VersionCheckOutcome};
 use crate::services::self_replace::{
-    extract_cc_profile_binary_from_tar_gz, expected_sha256_from_sums,
-    replace_executable_with_rollback, smoke_test_binary, verify_archive_sha256,
+    expected_sha256_from_sums, extract_cc_profile_binary_from_tar_gz,
+    replace_executable_with_rollback, restore_executable_from_backup, sibling_backup_path,
+    smoke_test_binary, verify_archive_sha256,
 };
 use anyhow::{Context, Result, bail};
 use dialoguer::Confirm;
@@ -28,10 +30,7 @@ pub fn homebrew_update_argv() -> Vec<OsString> {
 
 /// Structured argv for `brew upgrade <formula>` (no shell).
 pub fn homebrew_upgrade_argv() -> Vec<OsString> {
-    vec![
-        OsString::from("upgrade"),
-        OsString::from(HOMEBREW_FORMULA),
-    ]
+    vec![OsString::from("upgrade"), OsString::from(HOMEBREW_FORMULA)]
 }
 
 /// Structured argv for `cargo install cc-profile --locked --force`.
@@ -110,7 +109,7 @@ impl UpdateContext {
     /// Resolves the running executable, receipt, and package-manager commands.
     pub fn from_process() -> Result<Self> {
         let exe_path = resolve_current_exe_path()?;
-        let receipt_path = dirs::home_dir().map(|h| h.join(".cc-profile").join("install.toml"));
+        let receipt_path = default_receipt_path_from_env();
         Ok(Self {
             exe_path,
             receipt_path,
@@ -221,11 +220,7 @@ fn apply_update(
     download_bytes: impl Fn(&str) -> Result<Vec<u8>>,
 ) -> Result<()> {
     let receipt = ctx.receipt_path.as_deref();
-    let method = detect_from_exe_path_with_context(
-        &ctx.exe_path,
-        receipt,
-        &ctx.install_paths,
-    );
+    let method = detect_from_exe_path_with_context(&ctx.exe_path, receipt, &ctx.install_paths);
     match method {
         InstallMethod::Homebrew => {
             run_brew_sequence(
@@ -240,7 +235,9 @@ fn apply_update(
             run_cargo_reinstall(&ctx.cargo_program, &cargo_reinstall_argv()).context(
                 "Cargo reinstall failed; try `cargo install cc-profile --locked --force` manually",
             )?;
-            println!("cc-profile reinstalled via Cargo ({latest} when crates.io matches the release).");
+            println!(
+                "cc-profile reinstalled via Cargo ({latest} when crates.io matches the release)."
+            );
         }
         InstallMethod::Standalone => {
             apply_standalone_update(&ctx.exe_path, latest, fetch_release, download_bytes)
@@ -265,13 +262,17 @@ fn apply_standalone_update(
     let triple = release::host_target_triple()
         .context("standalone update is not supported on this platform")?;
     let release_doc = fetch_release().context("fetch latest GitHub release metadata")?;
-    let asset_name = release::select_asset_name_for_target(&release_doc, triple).with_context(
-        || format!("release has no archive asset for target triple {triple}"),
-    )?;
+    let asset_name = release::select_asset_name_for_target(&release_doc, triple)
+        .with_context(|| format!("release has no archive asset for target triple {triple}"))?;
     let archive_url = release::asset_download_url(&release_doc, &asset_name)
         .with_context(|| format!("release metadata has no download URL for {asset_name}"))?;
     let sums_url = release::asset_download_url(&release_doc, "SHA256SUMS")
         .context("release metadata has no SHA256SUMS asset")?;
+
+    ensure_https_download_url(&archive_url)
+        .with_context(|| format!("invalid release archive URL {archive_url}"))?;
+    ensure_https_download_url(&sums_url)
+        .with_context(|| format!("invalid SHA256SUMS URL {sums_url}"))?;
 
     let archive_bytes = download_bytes(&archive_url)
         .with_context(|| format!("download release archive from {archive_url}"))?;
@@ -295,10 +296,37 @@ fn apply_standalone_update(
     })
     .context("smoke test extracted binary with --version")?;
 
-    let backup = work.path().join("cc-profile.bak");
+    let backup = sibling_backup_path(exe);
     replace_executable_with_rollback(exe, &staged, &backup)
         .context("replace installed cc-profile binary")?;
+
+    if let Err(smoke_err) = smoke_test_binary(exe, |binary| {
+        Command::new(binary)
+            .arg("--version")
+            .output()
+            .map_err(Into::into)
+    }) {
+        restore_executable_from_backup(exe, &backup).with_context(|| {
+            format!(
+                "installed binary failed final --version smoke test; restore from {} failed",
+                backup.display()
+            )
+        })?;
+        return Err(smoke_err).context(format!(
+            "installed binary at {} failed final --version smoke test after replacement; restored previous binary from {}",
+            exe.display(),
+            backup.display()
+        ));
+    }
+
     println!("cc-profile updated to {latest}.");
+    Ok(())
+}
+
+fn ensure_https_download_url(url: &str) -> Result<()> {
+    if !url.starts_with("https://") {
+        bail!("release download URL must use https://");
+    }
     Ok(())
 }
 
@@ -378,7 +406,16 @@ mod tests {
     use assert_fs::prelude::*;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::path::PathBuf;
+
+    fn read_recorded_argv_lines(log: &Path) -> Vec<String> {
+        fs::read_to_string(log)
+            .expect("argv log")
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
 
     #[test]
     fn homebrew_update_argv_is_structured_brew_update() {
@@ -399,7 +436,9 @@ mod tests {
     fn cargo_reinstall_argv_is_locked_force_install() {
         let argv = cargo_reinstall_argv();
         assert_eq!(
-            argv.iter().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>(),
+            argv.iter()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
             vec![
                 "install".to_string(),
                 "cc-profile".to_string(),
@@ -412,59 +451,24 @@ mod tests {
     #[test]
     fn run_brew_sequence_uses_fake_brew_on_path() {
         let temp = assert_fs::TempDir::new().expect("tempdir");
-        let log = temp.path().join("brew.log");
-        let script = format!(
-            r#"#!/bin/sh
-echo "$@" >> "{}"
-exit 0
-"#,
-            log.display()
-        );
-        let brew = temp.path().join("brew");
-        fs::write(&brew, script).expect("write brew");
-        let mut perms = fs::metadata(&brew).expect("meta").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&brew, perms).expect("chmod");
+        let brew = fake_tool(&temp, "brew", "brew.log");
 
-        run_brew_sequence(
-            &brew,
-            &homebrew_update_argv(),
-            &homebrew_upgrade_argv(),
-        )
-        .expect("brew sequence");
+        run_brew_sequence(&brew, &homebrew_update_argv(), &homebrew_upgrade_argv())
+            .expect("brew sequence");
 
-        let contents = fs::read_to_string(&log).expect("log");
-        assert!(contents.contains("update"), "log: {contents}");
-        assert!(
-            contents.contains(HOMEBREW_FORMULA),
-            "log: {contents}"
-        );
+        let lines = read_recorded_argv_lines(&temp.path().join("brew.log"));
+        assert_eq!(lines, vec!["update", "upgrade", HOMEBREW_FORMULA]);
     }
 
     #[test]
     fn run_cargo_reinstall_uses_fake_cargo() {
         let temp = assert_fs::TempDir::new().expect("tempdir");
-        let log = temp.path().join("cargo.log");
-        let script = format!(
-            r#"#!/bin/sh
-echo "$@" >> "{}"
-exit 0
-"#,
-            log.display()
-        );
-        let cargo = temp.path().join("cargo");
-        fs::write(&cargo, script).expect("write cargo");
-        let mut perms = fs::metadata(&cargo).expect("meta").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&cargo, perms).expect("chmod");
+        let cargo = fake_tool(&temp, "cargo", "cargo.log");
 
         run_cargo_reinstall(&cargo, &cargo_reinstall_argv()).expect("cargo reinstall");
 
-        let contents = fs::read_to_string(&log).expect("log");
-        assert!(contents.contains("install"), "log: {contents}");
-        assert!(contents.contains("cc-profile"), "log: {contents}");
-        assert!(contents.contains("--locked"), "log: {contents}");
-        assert!(contents.contains("--force"), "log: {contents}");
+        let lines = read_recorded_argv_lines(&temp.path().join("cargo.log"));
+        assert_eq!(lines, vec!["install", "cc-profile", "--locked", "--force"]);
     }
 
     #[test]
@@ -500,7 +504,9 @@ exit 0
         let log = temp.path().join(log_name);
         let script = format!(
             r#"#!/bin/sh
-echo "$@" >> "{}"
+for arg in "$@"; do
+  printf '%s\n' "$arg" >> "{}"
+done
 exit 0
 "#,
             log.display()
@@ -538,9 +544,8 @@ exit 0
             },
         )
         .expect("homebrew update");
-        let log = fs::read_to_string(temp.path().join("brew.log")).expect("log");
-        assert!(log.contains("update"));
-        assert!(log.contains(HOMEBREW_FORMULA));
+        let lines = read_recorded_argv_lines(&temp.path().join("brew.log"));
+        assert_eq!(lines, vec!["update", "upgrade", HOMEBREW_FORMULA]);
     }
 
     #[test]
@@ -572,8 +577,8 @@ exit 0
             },
         )
         .expect("cargo update");
-        let log = fs::read_to_string(temp.path().join("cargo.log")).expect("log");
-        assert!(log.contains("--force"));
+        let lines = read_recorded_argv_lines(&temp.path().join("cargo.log"));
+        assert_eq!(lines, vec!["install", "cc-profile", "--locked", "--force"]);
     }
 
     #[test]
@@ -615,6 +620,51 @@ exit 0
     }
 
     #[test]
+    fn update_standalone_rejects_non_https_download_url() {
+        let triple = release::host_target_triple().expect("host triple");
+        let asset_name = format!("cc-profile-v0.2.0-{triple}.tar.gz");
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let exe = temp.path().join("cc-profile");
+        fs::write(&exe, b"original").expect("exe");
+        temp.child("install.toml")
+            .write_str("method = \"standalone\"\n")
+            .expect("receipt");
+        let receipt = temp.path().join("install.toml");
+        let json = format!(
+            r#"{{
+            "tag_name": "v0.2.0",
+            "assets": [
+                {{"name": "SHA256SUMS", "browser_download_url": "http://example.com/SHA256SUMS"}},
+                {{"name": "{asset_name}", "browser_download_url": "https://example.com/archive"}}
+            ]
+        }}"#
+        );
+        let release = release::parse_latest_release_json(&json).expect("parse");
+        let err = run_update_injected(
+            UpdateOptions {
+                check_only: false,
+                skip_confirm: true,
+            },
+            |_current| Ok("v0.2.0".to_string()),
+            || Ok(release),
+            |_url| bail!("download should not run"),
+            || {
+                Ok(UpdateContext {
+                    exe_path: exe.clone(),
+                    receipt_path: Some(receipt),
+                    install_paths: InstallPathContext::default(),
+                    brew_program: PathBuf::from("brew"),
+                    cargo_program: PathBuf::from("cargo"),
+                    confirm: Box::new(|_| Ok(true)),
+                })
+            },
+        )
+        .expect_err("http");
+        let message = format!("{err:#}").to_ascii_lowercase();
+        assert!(message.contains("https"), "unexpected error: {message}");
+    }
+
+    #[test]
     fn standalone_checksum_failure_leaves_binary_untouched() {
         let triple = release::host_target_triple().expect("host triple for test");
         let asset_name = format!("cc-profile-v0.2.0-{triple}.tar.gz");
@@ -644,7 +694,8 @@ exit 0
             || Ok(release),
             |url| {
                 if url.ends_with("SHA256SUMS") {
-                    Ok(format!("deadbeef  {asset_name}\n").into_bytes())
+                    let wrong = "f".repeat(64);
+                    Ok(format!("{wrong}  {asset_name}\n").into_bytes())
                 } else {
                     Ok(b"not-the-archive".to_vec())
                 }
