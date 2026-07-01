@@ -98,36 +98,39 @@ fn active_profile_exists(config: &Config) -> bool {
         .is_some_and(|name| config.profiles.contains_key(name))
 }
 
-fn profile_options(config: &Config) -> Vec<String> {
-    let mut options: Vec<String> = config
+/// Builds (name, label) pairs for the profile menu. Binding the raw profile
+/// name to its display label in one value means a profile literally named
+/// "foo  active" can't be mangled by stripping a suffix off the label.
+fn profile_menu_entries(config: &Config) -> Vec<(String, String)> {
+    config
         .profiles
         .keys()
         .map(|name| {
-            if config.active_profile.as_deref() == Some(name.as_str()) {
+            let label = if config.active_profile.as_deref() == Some(name.as_str()) {
                 format!("{name}  active")
             } else {
                 name.clone()
-            }
+            };
+            (name.clone(), label)
         })
-        .collect();
-    options.push("Back".to_string());
-    options
+        .collect()
 }
 
 fn profile_menu(repository: &ConfigRepository) -> Result<()> {
     loop {
         let config = repository.load()?;
-        let options = profile_options(&config);
+        let entries = profile_menu_entries(&config);
+        let mut labels: Vec<&str> = entries.iter().map(|(_, label)| label.as_str()).collect();
+        labels.push("Back");
         let selected = Select::new()
             .with_prompt("Select a profile")
-            .items(&options)
+            .items(&labels)
             .default(0)
             .interact()?;
-        let selected_option = &options[selected];
-        if selected_option == "Back" {
+        if selected >= entries.len() {
             return Ok(());
         }
-        let profile_name = selected_option.trim_end_matches("  active").to_string();
+        let profile_name = entries[selected].0.clone();
         profile_detail_menu(repository, &profile_name)?;
     }
 }
@@ -447,10 +450,32 @@ mod tests {
     }
 
     #[test]
-    fn render_profile_options_marks_active_profile() {
-        let options = profile_options(&config_with_active_profile());
+    fn profile_menu_entries_binds_name_to_label_without_parsing() {
+        let mut config = config_with_active_profile();
+        config.profiles.insert(
+            "foo  active".to_string(),
+            Profile::builder()
+                .endpoint("https://api.anthropic.com".to_string())
+                .api_key("sk-ant-other".to_string())
+                .fable("claude-fable-5".to_string())
+                .opus("claude-opus-4-8".to_string())
+                .sonnet("claude-sonnet-4-6".to_string())
+                .haiku("claude-haiku-4-5-20251001".to_string())
+                .build(),
+        );
 
-        assert_eq!(options, vec!["profile-a  active", "Back"]);
+        let entries = profile_menu_entries(&config);
+
+        // A profile literally named "foo  active" must keep its raw name intact
+        // (not mangled by stripping a "  active" suffix) and resolve by index,
+        // while the actually-active profile gets the " active" label appended.
+        assert_eq!(
+            entries,
+            vec![
+                ("foo  active".to_string(), "foo  active".to_string()),
+                ("profile-a".to_string(), "profile-a  active".to_string()),
+            ]
+        );
     }
 
     #[test]
