@@ -160,4 +160,6 @@ Run the same checks as CI locally:
 scripts/render-formula.sh <version> <SHA256SUMS> > cc-profile.rb && brew style cc-profile.rb
 ```
 
+One-time setup (PAT secret, first tap push, livecheck safety net) is documented in [`docs/homebrew-automation.md`](docs/homebrew-automation.md).
+
 **Testing internals** — `tests/install_platform_mapping_test.sh` checks the standalone platform mapping. Integration tests can point `CC_PROFILE_CLAUDE_BIN` at a test shim ([`tests/fixtures/cc-profile-test-claude.rs`](tests/fixtures/cc-profile-test-claude.rs)) instead of the real `claude` binary; unset it afterward.
