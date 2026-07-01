@@ -26,7 +26,7 @@ Use this checklist after implementation. Do not mark an item complete until veri
 - [x] Package metadata includes description, license, repository, homepage, readme, keywords, and categories.
 - [x] The integration-test shim is not installed as a production binary.
 - [x] GitHub Release assets use the design's archive names and include `SHA256SUMS`.
-- [ ] Homebrew formula builds from source first; bottles can be added later. *(Not run locally: tap `therealhieu/homebrew-tap` / formula install requires published tap; README documents `brew install --build-from-source therealhieu/tap/cc-profile` when tap exists.)*
+- [x] Homebrew formula builds from source first; bottles can be added later. *(Verified 2026-07-01: tap `therealhieu/homebrew-tap` published, `brew install therealhieu/tap/cc-profile` builds from source, `brew test` and `brew audit --strict --online` pass.)*
 - [x] Standalone self-update rejects checksum mismatches and path traversal archive entries.
 - [x] `brew` and `cargo` are invoked with structured command arguments, not shell strings.
 
@@ -53,4 +53,4 @@ Use this checklist after implementation. Do not mark an item complete until veri
 - [x] PR is open.
 - [x] GitHub Actions CI is green.
 - [x] Release workflow has been tested or reviewed with required secrets documented.
-- [x] Homebrew formula has been tested locally or marked with exact reason it could not run. *(Same as Decisions: tap not exercised in this worktree; template in `Formula/cc-profile.rb` and README section.)*
+- [x] Homebrew formula has been tested locally or marked with exact reason it could not run. *(Verified 2026-07-01: `brew install therealhieu/tap/cc-profile` from source, `brew test`, `brew audit --strict --online`, and `cc-profile update --check` (Homebrew detection) all pass.)*
