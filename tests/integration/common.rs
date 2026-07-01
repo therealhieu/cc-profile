@@ -12,13 +12,32 @@ pub fn test_claude_shim() -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|| manifest_dir.join("target"));
         let shim = out_dir.join("cc-profile-test-claude-fixture");
-        let status = Command::new("rustc")
+        let output = Command::new("rustc")
             .arg(&source)
             .arg("-o")
             .arg(&shim)
-            .status()
-            .expect("invoke rustc for test shim");
-        assert!(status.success(), "rustc failed to build test Claude shim");
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to invoke `rustc` to build test Claude shim.\n\
+                     source: {}\n\
+                     error: {e}\n\
+                     Install Rust (rustc) and ensure it is on PATH to run integration tests.",
+                    source.display()
+                );
+            });
+        if !output.status.success() {
+            panic!(
+                "rustc failed to build test Claude shim (status: {})\n\
+                 source: {}\n\
+                 stdout:\n{}\n\
+                 stderr:\n{}",
+                output.status,
+                source.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
         shim
     })
     .clone()

@@ -22,6 +22,16 @@ pub struct CommandSpec {
 /// Returns an error when no active profile is set or the active profile name is missing from
 /// [`Config::profiles`].
 pub fn build_command_spec(config: &Config) -> Result<CommandSpec> {
+    let program_override = std::env::var("CC_PROFILE_CLAUDE_BIN").ok();
+    build_command_spec_with_program(config, program_override)
+}
+
+/// Like [`build_command_spec`], but uses `program_override` when set instead of reading
+/// `CC_PROFILE_CLAUDE_BIN` from the environment.
+pub(crate) fn build_command_spec_with_program(
+    config: &Config,
+    program_override: Option<String>,
+) -> Result<CommandSpec> {
     let Some(active_name) = config.active_profile.as_ref() else {
         bail!("No active profile is set");
     };
@@ -54,8 +64,7 @@ pub fn build_command_spec(config: &Config) -> Result<CommandSpec> {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
-    // Override for integration tests / manual debugging; defaults to the real `claude` binary.
-    let program = std::env::var("CC_PROFILE_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
+    let program = program_override.unwrap_or_else(|| "claude".to_string());
 
     Ok(CommandSpec {
         program,
@@ -135,17 +144,13 @@ mod tests {
     }
 
     #[test]
-    fn build_command_spec_uses_cc_profile_claude_bin_when_set() {
-        let key = "CC_PROFILE_CLAUDE_BIN";
-        let previous = std::env::var(key).ok();
-        // SAFETY: test sets and restores a process env var; other tests should not rely on this key.
-        unsafe { std::env::set_var(key, "/tmp/custom-claude") };
-        let spec = build_command_spec(&active_config(false)).expect("spec should build");
+    fn build_command_spec_uses_program_override_when_set() {
+        let spec = build_command_spec_with_program(
+            &active_config(false),
+            Some("/tmp/custom-claude".to_string()),
+        )
+        .expect("spec should build");
         assert_eq!(spec.program, "/tmp/custom-claude");
-        match previous {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
     }
 
     #[test]
