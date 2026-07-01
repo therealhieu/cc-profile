@@ -38,23 +38,68 @@ The standalone installer verifies `SHA256SUMS` before placing the binary. Overri
 
 ## Quick Start
 
-```bash
-# 1. Create a profile (mark it active with --active)
-cc-profile new \
-  --name work \
-  --endpoint https://api.anthropic.com \
-  --api-key sk-ant-... \
-  --fable claude-fable-5 \
-  --opus claude-opus-4.8 \
-  --sonnet claude-sonnet-4.6 \
-  --haiku claude-haiku-4.5 \
-  --active
+Run `cc-profile` with no arguments to open a menu-driven UI (arrow keys + enter) — no flags to remember.
 
-# 2. Launch Claude Code with the active profile
-cc-profile start
+```
+cc-profile
+────────────────────────────────────────
+Active profile  work
+
+Endpoint        https://api.anthropic.com
+API key         sk-ant-...
+
+Models
+  Fable         claude-fable-5
+  Opus          claude-opus-4.8
+  Sonnet        claude-sonnet-4.6
+  Haiku         claude-haiku-4.5
+
+Claude args
+  skip permissions  false
+
+Custom envs
+  none
+
+? Select an option ›
+❯ List profiles
+  New profile
+  Show config
+  Args
+  Envs
+  Start Claude
+  Quit
 ```
 
-Run `cc-profile` with no arguments for an interactive menu.
+**Creating a profile** — select `New profile` and answer the prompts:
+
+```
+? Profile name › staging
+? Endpoint › https://staging.example.com
+? API key › sk-staging-...
+? Fable model › claude-fable-5
+? Opus model › claude-opus-4.8
+? Sonnet model › claude-sonnet-4.6
+? Haiku model › claude-haiku-4.5
+? Set as active profile? › yes
+Profile "staging" saved.
+Profile "staging" is now active.
+```
+
+**Managing an existing profile** — `List profiles` shows all profiles (the active one marked), then drills into `Set active`, `Edit`, or `Delete`:
+
+```
+? Select a profile ›
+❯ staging  active
+  work
+  Back
+
+? Select an option ›
+❯ Edit
+  Delete
+  Back
+```
+
+`Args` and `Envs` work the same way — toggle `--dangerously-skip-permissions`, or add/edit/delete custom environment variables applied to every `cc-profile start`.
 
 ## Configuration
 
