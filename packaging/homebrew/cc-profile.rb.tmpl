@@ -1,0 +1,37 @@
+class CcProfile < Formula
+  desc "Profile management for Claude Code endpoints and models"
+  homepage "https://github.com/therealhieu/cc-profile"
+  version "__VERSION__"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/therealhieu/cc-profile/releases/download/v__VERSION__/cc-profile-v__VERSION__-aarch64-apple-darwin.tar.gz"
+      sha256 "__SHA_DARWIN_ARM64__"
+    end
+    on_intel do
+      url "https://github.com/therealhieu/cc-profile/releases/download/v__VERSION__/cc-profile-v__VERSION__-x86_64-apple-darwin.tar.gz"
+      sha256 "__SHA_DARWIN_X86_64__"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "https://github.com/therealhieu/cc-profile/releases/download/v__VERSION__/cc-profile-v__VERSION__-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "__SHA_LINUX_X86_64__"
+    end
+  end
+
+  livecheck do
+    url :homepage
+    strategy :github_latest
+  end
+
+  def install
+    bin.install "cc-profile"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/cc-profile --version")
+  end
+end
