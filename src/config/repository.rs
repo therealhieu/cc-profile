@@ -65,6 +65,19 @@ impl ConfigRepository {
         set_owner_only_permissions(&self.path)?;
         Ok(())
     }
+
+    /// Loads the config, applies `mutate`, persists the result, and returns the saved config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the config cannot be loaded, `mutate` returns an error
+    /// (in which case nothing is written), or the result cannot be saved.
+    pub fn update(&self, mutate: impl FnOnce(&mut Config) -> Result<()>) -> Result<Config> {
+        let mut config = self.load()?;
+        mutate(&mut config)?;
+        self.save(&config)?;
+        Ok(config)
+    }
 }
 
 fn ensure_config_parent_directory(config_path: &Path) -> Result<()> {
@@ -269,6 +282,45 @@ mod tests {
             fs::read_to_string(path).expect("read config"),
             "version = 999\n"
         );
+    }
+
+    #[test]
+    fn update_persists_mutation_and_returns_saved_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repository = ConfigRepository::new(temp.path().join("plain-config.toml"));
+        repository
+            .save(&sample_config())
+            .expect("seed save should succeed");
+
+        let updated = repository
+            .update(|config| {
+                config.active_profile = Some("profile-b".to_string());
+                Ok(())
+            })
+            .expect("update should succeed");
+
+        assert_eq!(updated.active_profile, Some("profile-b".to_string()));
+        let reloaded = repository.load().expect("load after update");
+        assert_eq!(reloaded, updated);
+        assert_eq!(reloaded.active_profile, Some("profile-b".to_string()));
+    }
+
+    #[test]
+    fn update_propagates_mutator_error_without_writing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("plain-config.toml");
+        let repository = ConfigRepository::new(path.clone());
+        let seed = sample_config();
+        repository.save(&seed).expect("seed save should succeed");
+        let before = fs::read_to_string(&path).expect("read seeded config");
+
+        let error = repository
+            .update(|_config| Err(anyhow::anyhow!("boom")))
+            .expect_err("mutator error should propagate");
+
+        assert!(error.to_string().contains("boom"));
+        let after = fs::read_to_string(&path).expect("read config after failed update");
+        assert_eq!(after, before, "file must be unchanged when mutator fails");
     }
 
     #[cfg(unix)]
