@@ -4,15 +4,15 @@ use crate::services::install_method::{
     InstallMethod, InstallPathContext, detect_from_exe_path_with_context,
 };
 use crate::services::receipt::default_receipt_path_from_env;
-use crate::services::update_check_cache::{
-    UpdateCheckCache, PASSIVE_CHECK_MIN_INTERVAL, default_cache_path, format_rfc3339_utc,
-    is_eligible_for_passive_check, passive_checks_disabled_by_env, read_cache, write_cache,
-};
 use crate::services::release::{self, GitHubRelease, VersionCheckOutcome};
 use crate::services::self_replace::{
     expected_sha256_from_sums, extract_cc_profile_binary_from_tar_gz,
     replace_executable_with_rollback, restore_executable_from_backup, sibling_backup_path,
     smoke_test_binary, verify_archive_sha256,
+};
+use crate::services::update_check_cache::{
+    PASSIVE_CHECK_MIN_INTERVAL, UpdateCheckCache, default_cache_path, format_rfc3339_utc,
+    is_eligible_for_passive_check, passive_checks_disabled_by_env, read_cache, write_cache,
 };
 use anyhow::{Context, Result, bail};
 use dialoguer::Confirm;
@@ -160,15 +160,11 @@ pub fn print_passive_update_notice(latest: &str) {
 
 /// Runs an optional once-per-day passive check; failures and lookup errors do not propagate.
 pub fn run_passive_update_check_before_interactive() {
-    let _ = run_passive_update_check_injected(
-        SystemTime::now(),
-        default_cache_path(),
-        || {
-            release::check_latest_version(env!("CARGO_PKG_VERSION"), || {
-                default_latest_tag_lookup(env!("CARGO_PKG_VERSION"))
-            })
-        },
-    );
+    let _ = run_passive_update_check_injected(SystemTime::now(), default_cache_path(), || {
+        release::check_latest_version(env!("CARGO_PKG_VERSION"), || {
+            default_latest_tag_lookup(env!("CARGO_PKG_VERSION"))
+        })
+    });
 }
 
 /// Injectable passive check for tests (`cache_path` = `None` skips cache I/O).
@@ -184,11 +180,7 @@ pub fn run_passive_update_check_injected(
         return Ok(());
     };
     let existing = read_cache(&path)?;
-    if !is_eligible_for_passive_check(
-        existing.as_ref(),
-        now,
-        PASSIVE_CHECK_MIN_INTERVAL,
-    ) {
+    if !is_eligible_for_passive_check(existing.as_ref(), now, PASSIVE_CHECK_MIN_INTERVAL) {
         return Ok(());
     }
     let outcome = lookup();
@@ -464,9 +456,8 @@ fn fetch_github_release_bytes(url: &str) -> Result<Vec<u8>> {
                 .unwrap_or(url);
             let candidate = Path::new(&root).join(basename);
             if candidate.is_file() {
-                return std::fs::read(&candidate).with_context(|| {
-                    format!("read release fixture {}", candidate.display())
-                });
+                return std::fs::read(&candidate)
+                    .with_context(|| format!("read release fixture {}", candidate.display()));
             }
         }
     }
@@ -830,16 +821,12 @@ exit 0
         let temp = assert_fs::TempDir::new().expect("tempdir");
         let path = temp.path().join("update-check.toml");
         let mut lookup_ran = false;
-        run_passive_update_check_injected(
-            SystemTime::now(),
-            Some(path),
-            || {
-                lookup_ran = true;
-                VersionCheckOutcome::UpdateAvailable {
-                    latest: "9.9.9".to_string(),
-                }
-            },
-        )
+        run_passive_update_check_injected(SystemTime::now(), Some(path), || {
+            lookup_ran = true;
+            VersionCheckOutcome::UpdateAvailable {
+                latest: "9.9.9".to_string(),
+            }
+        })
         .expect("passive");
         assert!(!lookup_ran);
         unsafe {
@@ -860,16 +847,12 @@ exit 0
         )
         .expect("write");
         let mut lookup_ran = false;
-        run_passive_update_check_injected(
-            SystemTime::now(),
-            Some(path),
-            || {
-                lookup_ran = true;
-                VersionCheckOutcome::UpdateAvailable {
-                    latest: "9.9.9".to_string(),
-                }
-            },
-        )
+        run_passive_update_check_injected(SystemTime::now(), Some(path), || {
+            lookup_ran = true;
+            VersionCheckOutcome::UpdateAvailable {
+                latest: "9.9.9".to_string(),
+            }
+        })
         .expect("passive");
         assert!(!lookup_ran);
     }
@@ -879,15 +862,11 @@ exit 0
         let temp = assert_fs::TempDir::new().expect("tempdir");
         let path = temp.path().join("update-check.toml");
         let now = SystemTime::now();
-        run_passive_update_check_injected(
-            now,
-            Some(path.clone()),
-            || {
-                VersionCheckOutcome::UpdateAvailable {
-                    latest: "0.2.0".to_string(),
-                }
-            },
-        )
+        run_passive_update_check_injected(now, Some(path.clone()), || {
+            VersionCheckOutcome::UpdateAvailable {
+                latest: "0.2.0".to_string(),
+            }
+        })
         .expect("passive");
         let cache = read_cache(&path).expect("read").expect("cache");
         assert_eq!(cache.latest_seen.as_deref(), Some("0.2.0"));

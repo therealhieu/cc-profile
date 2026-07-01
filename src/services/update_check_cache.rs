@@ -62,8 +62,7 @@ pub fn read_cache(path: &Path) -> Result<Option<UpdateCheckCache>> {
     }
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("read update check cache {}", path.display()))?;
-    let cache: UpdateCheckCache =
-        toml::from_str(&contents).context("parse update-check.toml")?;
+    let cache: UpdateCheckCache = toml::from_str(&contents).context("parse update-check.toml")?;
     Ok(Some(cache))
 }
 
@@ -97,13 +96,9 @@ fn format_utc_from_unix(secs: u64, nanos: u32) -> String {
     let minute = (time_of_day % 3600) / 60;
     let second = time_of_day % 60;
     if nanos == 0 {
-        format!(
-            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
-        )
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
     } else {
-        format!(
-            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nanos:09}Z"
-        )
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nanos:09}Z")
     }
 }
 
@@ -139,30 +134,18 @@ pub fn parse_rfc3339_utc(s: &str) -> Result<SystemTime> {
         anyhow::bail!("invalid last_checked_at format");
     }
     let mut date_parts = date.split('-');
-    let year: i32 = date_parts
-        .next()
-        .context("year")?
-        .parse()
-        .context("year")?;
+    let year: i32 = date_parts.next().context("year")?.parse().context("year")?;
     let month: u32 = date_parts
         .next()
         .context("month")?
         .parse()
         .context("month")?;
-    let day: u32 = date_parts
-        .next()
-        .context("day")?
-        .parse()
-        .context("day")?;
+    let day: u32 = date_parts.next().context("day")?.parse().context("day")?;
     if date_parts.next().is_some() {
         anyhow::bail!("invalid date in last_checked_at");
     }
     let mut time_parts = time.split(':');
-    let hour: u32 = time_parts
-        .next()
-        .context("hour")?
-        .parse()
-        .context("hour")?;
+    let hour: u32 = time_parts.next().context("hour")?.parse().context("hour")?;
     let minute: u32 = time_parts
         .next()
         .context("minute")?
@@ -177,10 +160,8 @@ pub fn parse_rfc3339_utc(s: &str) -> Result<SystemTime> {
         anyhow::bail!("invalid time in last_checked_at");
     }
     let days = days_from_civil(year, month, day)?;
-    let secs = days as u64 * 86_400
-        + u64::from(hour) * 3600
-        + u64::from(minute) * 60
-        + u64::from(second);
+    let secs =
+        days as u64 * 86_400 + u64::from(hour) * 3600 + u64::from(minute) * 60 + u64::from(second);
     Ok(UNIX_EPOCH + Duration::new(secs, frac_nanos))
 }
 
