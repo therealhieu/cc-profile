@@ -19,6 +19,7 @@ Jobs (default: run all in order):
   render-formula   render Homebrew formula from SHA256SUMS
   release-workflow  check release.yml wires up the bump-formula job
   readme-homebrew  check README documents the generated tap formula
+  homebrew-runbook  check docs/homebrew-automation.md bootstrap runbook exists
 
 Examples:
   ./scripts/ci.sh fmt test
@@ -66,7 +67,12 @@ job_readme_homebrew() {
   ./tests/readme_homebrew_test.sh
 }
 
-ALL_JOBS=(fmt clippy test package publish-dry-run render-formula release-workflow readme-homebrew)
+job_homebrew_runbook() {
+  echo "==> homebrew-runbook"
+  ./tests/homebrew_runbook_test.sh
+}
+
+ALL_JOBS=(fmt clippy test package publish-dry-run render-formula release-workflow readme-homebrew homebrew-runbook)
 
 run_job() {
   case "${1}" in
@@ -78,6 +84,7 @@ run_job() {
     render-formula) job_render_formula ;;
     release-workflow) job_release_workflow ;;
     readme-homebrew) job_readme_homebrew ;;
+    homebrew-runbook) job_homebrew_runbook ;;
     *)
       echo "Unknown job: ${1}" >&2
       usage >&2
