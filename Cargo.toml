@@ -1,7 +1,23 @@
 [package]
 name = "cc-profile"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
+description = "Profile management for Claude Code endpoints and models"
+license = "MIT"
+repository = "https://github.com/therealhieu/cc-profile"
+homepage = "https://github.com/therealhieu/cc-profile"
+readme = "README.md"
+keywords = ["claude", "cli", "profiles", "anthropic"]
+categories = ["command-line-utilities"]
+exclude = [
+    "AGENTS.md",
+    "docs/superpowers/**",
+]
+
+[[bin]]
+name = "cc-profile"
+path = "src/main.rs"
 
 [lib]
 name = "cc_profile"
