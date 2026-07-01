@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use cc_profile::services::self_replace::sha256_hex;
 use predicates::prelude::*;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -201,13 +202,8 @@ fn update_standalone_replaces_binary_from_fixtures() {
         .expect("tar");
     assert!(tar_status.success(), "tar failed");
 
-    let shasum = StdCommand::new("shasum")
-        .args(["-a", "256", archive_path.to_str().expect("utf8")])
-        .output()
-        .expect("shasum");
-    assert!(shasum.status.success());
-    let hash_line = String::from_utf8_lossy(&shasum.stdout);
-    let hash = hash_line.split_whitespace().next().expect("hash");
+    let archive_bytes = fs::read(&archive_path).expect("read archive");
+    let hash = sha256_hex(&archive_bytes);
     fs::write(
         temp.path().join("SHA256SUMS"),
         format!("{hash}  {archive_name}\n"),

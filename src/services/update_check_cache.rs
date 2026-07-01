@@ -89,9 +89,9 @@ pub fn format_rfc3339_utc(time: SystemTime) -> Result<String> {
 }
 
 fn format_utc_from_unix(secs: u64, nanos: u32) -> String {
-    let days = (secs / 86_400) as i32;
+    let days = (secs / 86_400) as i64;
     let time_of_day = secs % 86_400;
-    let (year, month, day) = civil_from_days(days);
+    let (year, month, day) = civil_from_days_i64(days);
     let hour = time_of_day / 3600;
     let minute = (time_of_day % 3600) / 60;
     let second = time_of_day % 60;
@@ -110,6 +110,8 @@ pub fn parse_rfc3339_utc(s: &str) -> Result<SystemTime> {
             let frac = rest.trim_end_matches('Z');
             let nanos: u32 = if frac.is_empty() {
                 0
+            } else if frac.len() > 9 {
+                anyhow::bail!("fractional seconds in last_checked_at exceed 9 digits");
             } else {
                 let padded = format!("{frac:0<9}");
                 padded[..9]
@@ -160,8 +162,15 @@ pub fn parse_rfc3339_utc(s: &str) -> Result<SystemTime> {
         anyhow::bail!("invalid time in last_checked_at");
     }
     let days = days_from_civil(year, month, day)?;
-    let secs =
-        days as u64 * 86_400 + u64::from(hour) * 3600 + u64::from(minute) * 60 + u64::from(second);
+    let time_of_day = i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second);
+    let day_secs = i64::from(days)
+        .checked_mul(86_400)
+        .and_then(|d| d.checked_add(time_of_day))
+        .context("last_checked_at out of supported range")?;
+    if day_secs < 0 {
+        anyhow::bail!("last_checked_at before Unix epoch");
+    }
+    let secs = day_secs as u64;
     Ok(UNIX_EPOCH + Duration::new(secs, frac_nanos))
 }
 
@@ -180,7 +189,7 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> Result<i32> {
     Ok(era * 146_097 + doe - 719_468)
 }
 
-fn civil_from_days(z: i32) -> (i32, u32, u32) {
+fn civil_from_days_i64(z: i64) -> (i32, u32, u32) {
     let z = z + 719_468;
     let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
     let doe = z - era * 146_097;
@@ -191,19 +200,19 @@ fn civil_from_days(z: i32) -> (i32, u32, u32) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
+    let year: i32 = y
+        .try_into()
+        .map_err(|_| ())
+        .expect("civil year out of i32 range");
+    (year, m as u32, d as u32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn env_lock() -> MutexGuard<'static, ()> {
-        ENV_LOCK.lock().expect("env lock")
-    }
+    use crate::services::update_test_env_lock::{
+        CcProfileNoUpdateCheckGuard, lock_cc_profile_update_check_env,
+    };
 
     #[test]
     fn update_check_cache_no_cache_means_eligible() {
@@ -260,15 +269,18 @@ mod tests {
 
     #[test]
     fn passive_checks_disabled_when_env_set() {
-        let _guard = env_lock();
-        // SAFETY: serialized by ENV_LOCK in this test module.
-        unsafe {
-            std::env::set_var("CC_PROFILE_NO_UPDATE_CHECK", "1");
-        }
+        let _lock = lock_cc_profile_update_check_env();
+        let _env = CcProfileNoUpdateCheckGuard::set("1");
         assert!(passive_checks_disabled_by_env());
-        unsafe {
-            std::env::remove_var("CC_PROFILE_NO_UPDATE_CHECK");
-        }
+    }
+
+    #[test]
+    fn parse_rfc3339_utc_rejects_fractional_seconds_over_nine_digits() {
+        let err = parse_rfc3339_utc("2026-07-01T00:00:00.1234567890Z").expect_err("frac");
+        assert!(
+            err.to_string().contains("9 digits"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

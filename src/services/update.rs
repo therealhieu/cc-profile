@@ -811,13 +811,11 @@ exit 0
 
     #[test]
     fn passive_update_check_skips_when_env_disables() {
-        use std::sync::{Mutex, MutexGuard};
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard: MutexGuard<'_, ()> = LOCK.lock().expect("lock");
-        // SAFETY: serialized by LOCK.
-        unsafe {
-            std::env::set_var("CC_PROFILE_NO_UPDATE_CHECK", "1");
-        }
+        use crate::services::update_test_env_lock::{
+            CcProfileNoUpdateCheckGuard, lock_cc_profile_update_check_env,
+        };
+        let _lock = lock_cc_profile_update_check_env();
+        let _env = CcProfileNoUpdateCheckGuard::set("1");
         let temp = assert_fs::TempDir::new().expect("tempdir");
         let path = temp.path().join("update-check.toml");
         let mut lookup_ran = false;
@@ -829,13 +827,13 @@ exit 0
         })
         .expect("passive");
         assert!(!lookup_ran);
-        unsafe {
-            std::env::remove_var("CC_PROFILE_NO_UPDATE_CHECK");
-        }
     }
 
     #[test]
     fn passive_update_check_skips_lookup_when_cache_recent() {
+        use crate::services::update_test_env_lock::lock_cc_profile_update_check_env;
+        let _lock = lock_cc_profile_update_check_env();
+        let _env = crate::services::update_test_env_lock::CcProfileNoUpdateCheckGuard::clear();
         let temp = assert_fs::TempDir::new().expect("tempdir");
         let path = temp.path().join("update-check.toml");
         write_cache(
@@ -859,6 +857,11 @@ exit 0
 
     #[test]
     fn passive_update_check_prints_notice_and_writes_cache() {
+        use crate::services::update_test_env_lock::{
+            CcProfileNoUpdateCheckGuard, lock_cc_profile_update_check_env,
+        };
+        let _lock = lock_cc_profile_update_check_env();
+        let _env = CcProfileNoUpdateCheckGuard::clear();
         let temp = assert_fs::TempDir::new().expect("tempdir");
         let path = temp.path().join("update-check.toml");
         let now = SystemTime::now();

@@ -44,6 +44,13 @@ fn validate_sha256_hex(hash: &str) -> Result<()> {
     Ok(())
 }
 
+/// Returns lowercase hex SHA-256 of `bytes`.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
 /// Verifies `archive_bytes` against an expected lowercase hex SHA-256 digest.
 pub fn verify_archive_sha256(archive_bytes: &[u8], expected_hex: &str) -> Result<()> {
     validate_sha256_hex(expected_hex)?;

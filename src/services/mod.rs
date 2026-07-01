@@ -13,3 +13,5 @@ pub mod release;
 pub mod self_replace;
 pub mod update;
 pub mod update_check_cache;
+#[cfg(test)]
+pub mod update_test_env_lock;
