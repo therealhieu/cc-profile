@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate tag version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Match tag to Cargo.toml version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          cargo_version="$(grep -E '^version[[:space:]]*=' Cargo.toml | head -1 | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
+          if [[ -z "${cargo_version}" ]]; then
+            echo "Could not read package version from Cargo.toml" >&2
+            exit 1
+          fi
+          if [[ "${version}" != "${cargo_version}" ]]; then
+            echo "Tag version ${version} does not match Cargo.toml ${cargo_version}" >&2
+            exit 1
+          fi
+          echo "Tag ${tag} matches Cargo.toml version ${cargo_version}"
+
+  verify:
+    name: CI checks
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: ./scripts/ci.sh
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: Create archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          staging="cc-profile-v${version}-${TARGET}"
+          mkdir -p "${staging}"
+          cp "target/${TARGET}/release/cc-profile" "${staging}/cc-profile"
+          cp LICENSE README.md "${staging}/"
+          tar -czf "cc-profile-v${version}-${TARGET}.tar.gz" -C "${staging}" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: cc-profile-v*.tar.gz
+
+  release:
+    name: GitHub Release and crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: archive-*
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(artifacts/cc-profile-v*.tar.gz)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            files=(cc-profile-v*.tar.gz)
+          fi
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release archives found" >&2
+            exit 1
+          fi
+          mkdir -p release-assets
+          cp "${files[@]}" release-assets/
+          (
+            cd release-assets
+            sha256sum cc-profile-v*.tar.gz | awk '{print $1 "  " $2}' > SHA256SUMS
+          )
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          gh release create "${tag}" \
+            --title "${tag}" \
+            --generate-notes \
+            release-assets/cc-profile-v*.tar.gz \
+            release-assets/SHA256SUMS
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "CARGO_REGISTRY_TOKEN is not set; skipping crates.io publish" >&2
+            exit 1
+          fi
+          cargo publish --locked --token "${CARGO_REGISTRY_TOKEN}"
