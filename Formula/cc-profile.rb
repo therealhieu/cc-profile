@@ -3,9 +3,14 @@ class CcProfile < Formula
   homepage "https://github.com/therealhieu/cc-profile"
   url "https://github.com/therealhieu/cc-profile/archive/refs/tags/v0.1.0.tar.gz"
   # Update sha256 when cutting a new release tag (brew fetch --force --build-from-source ./Formula/cc-profile.rb).
-  sha256 "bf15dc3bd1f2b5d7e27d339626f47715a3416e44383afca0c15144586a6e7731"
+  sha256 "eb4dc3926f024a6a5379151e98f5b722c4f9853806b4e3b46d5208ce1fd25887"
   license "MIT"
   head "https://github.com/therealhieu/cc-profile.git", branch: "master"
+
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   depends_on "rust" => :build
 
@@ -15,10 +20,5 @@ class CcProfile < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/cc-profile --version")
-  end
-
-  livecheck do
-    url :stable
-    strategy :github_latest
   end
 end
