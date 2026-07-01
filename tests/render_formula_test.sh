@@ -49,9 +49,61 @@ test_template_has_no_hardcoded_version() {
   fi
 }
 
+RENDER_SCRIPT="${ROOT}/scripts/render-formula.sh"
+SAMPLE_SUMS="${ROOT}/tests/fixtures/SHA256SUMS.sample"
+
+test_render_formula_substitutes_version_and_hashes() {
+  local label="render_formula_substitutes_version_and_hashes"
+  if [[ ! -x "${RENDER_SCRIPT}" ]]; then
+    fail "${label}" "expected executable script at ${RENDER_SCRIPT}"
+    return
+  fi
+  local output
+  if ! output="$("${RENDER_SCRIPT}" "1.2.3" "${SAMPLE_SUMS}")"; then
+    fail "${label}" "render-formula.sh exited nonzero for valid input"
+    return
+  fi
+  if [[ "${output}" != *"1.2.3"* ]]; then
+    fail "${label}" "rendered output missing version 1.2.3"
+  fi
+  local hash
+  for hash in \
+    "0a78ded75877c593b1e50b9e2dbd9508fd87fbf0d6482194e10c381f607f1dc3" \
+    "ad8722c751c15195d578841dbd52f992bbb8a31d23b5c95f9ba7c979907d074b" \
+    "3a637ef9a5c561f7323746408b5f23d715a10ee1f9b78ab7c6f57973ae49f12e"; do
+    if [[ "${output}" != *"${hash}"* ]]; then
+      fail "${label}" "rendered output missing expected hash ${hash}"
+    fi
+  done
+  if [[ "${output}" == *"__"*"__"* ]]; then
+    fail "${label}" "rendered output still contains a __ placeholder token"
+  fi
+}
+
+test_render_formula_fails_on_missing_target() {
+  local label="render_formula_fails_on_missing_target"
+  if [[ ! -x "${RENDER_SCRIPT}" ]]; then
+    fail "${label}" "expected executable script at ${RENDER_SCRIPT}"
+    return
+  fi
+  local tmp_sums
+  tmp_sums="$(mktemp)"
+  # Only darwin arm64 and darwin x86_64 lines; linux target line omitted.
+  cat >"${tmp_sums}" <<'EOF'
+0a78ded75877c593b1e50b9e2dbd9508fd87fbf0d6482194e10c381f607f1dc3  cc-profile-v1.2.3-aarch64-apple-darwin.tar.gz
+ad8722c751c15195d578841dbd52f992bbb8a31d23b5c95f9ba7c979907d074b  cc-profile-v1.2.3-x86_64-apple-darwin.tar.gz
+EOF
+  if "${RENDER_SCRIPT}" "1.2.3" "${tmp_sums}" >/dev/null 2>/dev/null; then
+    fail "${label}" "expected nonzero exit when a target sha256 is missing"
+  fi
+  rm -f "${tmp_sums}"
+}
+
 test_template_file_exists
 test_template_contains_placeholder_tokens
 test_template_has_no_hardcoded_version
+test_render_formula_substitutes_version_and_hashes
+test_render_formula_fails_on_missing_target
 
 if [[ "${failures}" -ne 0 ]]; then
   echo "${failures} render_formula test(s) failed" >&2
