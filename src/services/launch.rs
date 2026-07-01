@@ -42,22 +42,16 @@ pub(crate) fn build_command_spec_with_program(
     let mut envs = config.envs.clone();
     envs.insert("ANTHROPIC_BASE_URL".to_string(), profile.endpoint.clone());
     envs.insert("ANTHROPIC_API_KEY".to_string(), profile.api_key.clone());
-    envs.insert(
-        "ANTHROPIC_DEFAULT_FABLE_MODEL".to_string(),
-        profile.fable.clone(),
-    );
-    envs.insert(
-        "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-        profile.opus.clone(),
-    );
-    envs.insert(
-        "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-        profile.sonnet.clone(),
-    );
-    envs.insert(
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-        profile.haiku.clone(),
-    );
+
+    let model_envs = [
+        ("ANTHROPIC_DEFAULT_FABLE_MODEL", &profile.fable),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", &profile.opus),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", &profile.sonnet),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", &profile.haiku),
+    ];
+    for (key, value) in model_envs {
+        envs.insert(key.to_string(), value.clone());
+    }
 
     let mut args = Vec::new();
     if config.args.dangerously_skip_permissions {
