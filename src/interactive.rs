@@ -1,11 +1,12 @@
 use crate::config::{Config, ConfigRepository, Profile};
-use crate::services::{claude_args, env_vars, launch, profiles};
+use crate::services::{claude_args, env_vars, launch, profiles, update};
 use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
 use std::io::{self, IsTerminal, Write};
 
 /// Runs the prompt-based interactive menu.
 pub fn run() -> Result<()> {
+    update::run_passive_update_check_before_interactive();
     let repository = ConfigRepository::default()?;
     loop {
         let config = repository.load()?;

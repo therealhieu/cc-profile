@@ -4,6 +4,10 @@ use crate::services::install_method::{
     InstallMethod, InstallPathContext, detect_from_exe_path_with_context,
 };
 use crate::services::receipt::default_receipt_path_from_env;
+use crate::services::update_check_cache::{
+    UpdateCheckCache, PASSIVE_CHECK_MIN_INTERVAL, default_cache_path, format_rfc3339_utc,
+    is_eligible_for_passive_check, passive_checks_disabled_by_env, read_cache, write_cache,
+};
 use crate::services::release::{self, GitHubRelease, VersionCheckOutcome};
 use crate::services::self_replace::{
     expected_sha256_from_sums, extract_cc_profile_binary_from_tar_gz,
@@ -16,7 +20,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 use ureq::Agent;
 
@@ -146,6 +150,72 @@ fn prompt_confirm(message: &str) -> Result<bool> {
         .default(false)
         .interact()
         .context("read confirmation")
+}
+
+/// Prints the passive interactive-mode update notice (does not install).
+pub fn print_passive_update_notice(latest: &str) {
+    println!("A new cc-profile version is available: {latest}.");
+    println!("Run `cc-profile update` to install it.");
+}
+
+/// Runs an optional once-per-day passive check; failures and lookup errors do not propagate.
+pub fn run_passive_update_check_before_interactive() {
+    let _ = run_passive_update_check_injected(
+        SystemTime::now(),
+        default_cache_path(),
+        || {
+            release::check_latest_version(env!("CARGO_PKG_VERSION"), || {
+                default_latest_tag_lookup(env!("CARGO_PKG_VERSION"))
+            })
+        },
+    );
+}
+
+/// Injectable passive check for tests (`cache_path` = `None` skips cache I/O).
+pub fn run_passive_update_check_injected(
+    now: SystemTime,
+    cache_path: Option<PathBuf>,
+    lookup: impl FnOnce() -> VersionCheckOutcome,
+) -> Result<()> {
+    if passive_checks_disabled_by_env() {
+        return Ok(());
+    }
+    let Some(path) = cache_path else {
+        return Ok(());
+    };
+    let existing = read_cache(&path)?;
+    if !is_eligible_for_passive_check(
+        existing.as_ref(),
+        now,
+        PASSIVE_CHECK_MIN_INTERVAL,
+    ) {
+        return Ok(());
+    }
+    let outcome = lookup();
+    let stamp = format_rfc3339_utc(now)?;
+    match outcome {
+        VersionCheckOutcome::UpdateAvailable { latest } => {
+            write_cache(
+                &path,
+                &UpdateCheckCache {
+                    last_checked_at: stamp,
+                    latest_seen: Some(latest.clone()),
+                },
+            )?;
+            print_passive_update_notice(&latest);
+        }
+        VersionCheckOutcome::Current => {
+            write_cache(
+                &path,
+                &UpdateCheckCache {
+                    last_checked_at: stamp,
+                    latest_seen: None,
+                },
+            )?;
+        }
+        VersionCheckOutcome::LookupFailed { .. } => {}
+    }
+    Ok(())
 }
 
 /// Runs update or check-only flow without loading profile config.
@@ -723,5 +793,80 @@ exit 0
             "unexpected error chain: {chain}"
         );
         assert_eq!(fs::read(&exe).expect("read"), b"original");
+    }
+
+    #[test]
+    fn passive_update_check_skips_when_env_disables() {
+        use std::sync::{Mutex, MutexGuard};
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard: MutexGuard<'_, ()> = LOCK.lock().expect("lock");
+        // SAFETY: serialized by LOCK.
+        unsafe {
+            std::env::set_var("CC_PROFILE_NO_UPDATE_CHECK", "1");
+        }
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let path = temp.path().join("update-check.toml");
+        let mut lookup_ran = false;
+        run_passive_update_check_injected(
+            SystemTime::now(),
+            Some(path),
+            || {
+                lookup_ran = true;
+                VersionCheckOutcome::UpdateAvailable {
+                    latest: "9.9.9".to_string(),
+                }
+            },
+        )
+        .expect("passive");
+        assert!(!lookup_ran);
+        unsafe {
+            std::env::remove_var("CC_PROFILE_NO_UPDATE_CHECK");
+        }
+    }
+
+    #[test]
+    fn passive_update_check_skips_lookup_when_cache_recent() {
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let path = temp.path().join("update-check.toml");
+        write_cache(
+            &path,
+            &UpdateCheckCache {
+                last_checked_at: format_rfc3339_utc(SystemTime::now()).expect("stamp"),
+                latest_seen: None,
+            },
+        )
+        .expect("write");
+        let mut lookup_ran = false;
+        run_passive_update_check_injected(
+            SystemTime::now(),
+            Some(path),
+            || {
+                lookup_ran = true;
+                VersionCheckOutcome::UpdateAvailable {
+                    latest: "9.9.9".to_string(),
+                }
+            },
+        )
+        .expect("passive");
+        assert!(!lookup_ran);
+    }
+
+    #[test]
+    fn passive_update_check_prints_notice_and_writes_cache() {
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let path = temp.path().join("update-check.toml");
+        let now = SystemTime::now();
+        run_passive_update_check_injected(
+            now,
+            Some(path.clone()),
+            || {
+                VersionCheckOutcome::UpdateAvailable {
+                    latest: "0.2.0".to_string(),
+                }
+            },
+        )
+        .expect("passive");
+        let cache = read_cache(&path).expect("read").expect("cache");
+        assert_eq!(cache.latest_seen.as_deref(), Some("0.2.0"));
     }
 }
