@@ -67,6 +67,17 @@ test_bump_formula_brew_style() {
   fi
 }
 
+test_bump_formula_brew_audit() {
+  local label="bump_formula_brew_audit"
+  if [[ ! -f "${WORKFLOW}" ]]; then
+    fail "${label}" "workflow missing, cannot check brew audit"
+    return
+  fi
+  if ! grep -Fq "brew audit" "${WORKFLOW}"; then
+    fail "${label}" "missing 'brew audit' invocation in ${WORKFLOW}"
+  fi
+}
+
 test_bump_formula_tap_token() {
   local label="bump_formula_tap_token"
   if [[ ! -f "${WORKFLOW}" ]]; then
@@ -94,6 +105,7 @@ test_bump_formula_job_present
 test_bump_formula_needs_release
 test_bump_formula_tag_guard
 test_bump_formula_brew_style
+test_bump_formula_brew_audit
 test_bump_formula_tap_token
 test_bump_formula_render_script
 
