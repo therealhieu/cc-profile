@@ -154,11 +154,13 @@ Run the same checks as CI locally:
 
 **Releases** — pushing a tag `vX.Y.Z` matching `Cargo.toml` `version` triggers [`release.yml`](.github/workflows/release.yml): it runs CI, builds macOS/Linux archives, uploads them plus `SHA256SUMS` to a GitHub Release, and publishes to crates.io. Requires the `CARGO_REGISTRY_TOKEN` Actions secret.
 
-**Homebrew formula** — the tap formula at [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) is generated from [`packaging/homebrew/cc-profile.rb.tmpl`](packaging/homebrew/cc-profile.rb.tmpl) on each release and installs prebuilt archives (no source build). CI renders the template, validates it with `brew style` and `brew audit --online`, and runs a real `brew install` before pushing it to the tap. To render and lint locally:
+**Homebrew formula** — the tap formula at [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) is generated from [`packaging/homebrew/cc-profile.rb.tmpl`](packaging/homebrew/cc-profile.rb.tmpl) on each release and installs prebuilt archives (no source build). CI renders the template into the cloned tap, validates it with `brew style` and `brew audit --online` (using the tap-qualified name so only formula cops apply), and runs a real `brew install` before pushing. To render and inspect locally:
 
 ```bash
-scripts/render-formula.sh <version> <SHA256SUMS> > cc-profile.rb && brew style cc-profile.rb
+scripts/render-formula.sh <version> <SHA256SUMS> > cc-profile.rb
 ```
+
+`brew style`/`brew audit` only report correctly against a formula inside a tap, not a bare file — CI handles that validation, so local inspection is a visual check of the rendered output.
 
 One-time setup (PAT secret, first tap push, livecheck safety net) is documented in [`docs/homebrew-automation.md`](docs/homebrew-automation.md).
 
