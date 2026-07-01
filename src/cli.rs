@@ -136,7 +136,6 @@ pub fn run() -> Result<()> {
 }
 
 fn update_command(check: bool, yes: bool) -> Result<()> {
-    let _ = yes;
     update::run_update(update::UpdateOptions {
         check_only: check,
         skip_confirm: yes,
