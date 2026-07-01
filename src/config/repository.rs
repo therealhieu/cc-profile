@@ -1,7 +1,7 @@
 //! File-backed config repository.
 
 use crate::config::Config;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -283,9 +283,11 @@ mod tests {
             .expect("set broad permissions");
         let repository = ConfigRepository::new(path.clone());
 
-        assert!(repository
-            .has_broad_permissions()
-            .expect("check permissions"));
+        assert!(
+            repository
+                .has_broad_permissions()
+                .expect("check permissions")
+        );
         repository.fix_permissions().expect("fix permissions");
 
         let mode = fs::metadata(path).expect("metadata").permissions().mode() & 0o777;

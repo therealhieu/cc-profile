@@ -1,6 +1,6 @@
 //! Validation for profile names, environment variables, and profile fields.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub fn validate_profile_name(value: &str) -> Result<()> {
     if value.is_empty()

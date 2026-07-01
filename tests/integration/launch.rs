@@ -1,3 +1,4 @@
+use crate::common::test_claude_shim;
 use assert_cmd::Command;
 use assert_fs::prelude::*;
 use predicates::prelude::*;
@@ -29,11 +30,11 @@ haiku = "claude-haiku-4-5-20251001"
         )
         .expect("write config");
 
-    let shim = assert_cmd::cargo::cargo_bin("cc-profile-test-claude");
+    let shim = test_claude_shim();
     Command::cargo_bin("cc-profile")
         .expect("binary exists")
         .env("HOME", temp.path())
-        .env("CC_PROFILE_CLAUDE_BIN", shim)
+        .env("CC_PROFILE_CLAUDE_BIN", &shim)
         .env("CC_PROFILE_TEST_CLAUDE_OUTPUT", shim_output.path())
         .arg("start")
         .assert()

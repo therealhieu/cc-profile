@@ -2,7 +2,7 @@
 
 use crate::config::validation::{validate_profile_name, validate_required_value};
 use crate::config::{Config, Profile};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Creates a named profile and optionally sets it as active.
 ///

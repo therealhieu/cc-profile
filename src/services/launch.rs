@@ -1,7 +1,7 @@
 //! Builds and runs the `claude` process from persisted [`Config`] state.
 
 use crate::config::Config;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::process::Command;
 
@@ -135,6 +135,20 @@ mod tests {
     }
 
     #[test]
+    fn build_command_spec_uses_cc_profile_claude_bin_when_set() {
+        let key = "CC_PROFILE_CLAUDE_BIN";
+        let previous = std::env::var(key).ok();
+        // SAFETY: test sets and restores a process env var; other tests should not rely on this key.
+        unsafe { std::env::set_var(key, "/tmp/custom-claude") };
+        let spec = build_command_spec(&active_config(false)).expect("spec should build");
+        assert_eq!(spec.program, "/tmp/custom-claude");
+        match previous {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    #[test]
     fn build_command_spec_uses_active_profile_envs_after_global_envs() {
         let spec = build_command_spec(&active_config(false)).expect("spec should build");
 
@@ -179,10 +193,12 @@ mod tests {
 
     #[test]
     fn build_command_spec_adds_skip_permissions_flag_only_when_enabled() {
-        assert!(build_command_spec(&active_config(false))
-            .expect("spec")
-            .args
-            .is_empty());
+        assert!(
+            build_command_spec(&active_config(false))
+                .expect("spec")
+                .args
+                .is_empty()
+        );
         assert_eq!(
             build_command_spec(&active_config(true)).expect("spec").args,
             vec!["--dangerously-skip-permissions"]
@@ -203,9 +219,11 @@ mod tests {
             ..Config::default()
         };
         let error = build_command_spec(&config).expect_err("missing profile entry should fail");
-        assert!(error
-            .to_string()
-            .contains("Active profile 'missing-profile' does not exist"));
+        assert!(
+            error
+                .to_string()
+                .contains("Active profile 'missing-profile' does not exist")
+        );
     }
 
     #[test]

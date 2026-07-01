@@ -4,5 +4,5 @@ pub mod model;
 pub mod repository;
 pub mod validation;
 
-pub use model::{default_config_version, Args, Config, Profile};
+pub use model::{Args, Config, Profile, default_config_version};
 pub use repository::ConfigRepository;

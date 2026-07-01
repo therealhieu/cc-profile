@@ -2,8 +2,8 @@
 //!
 //! Keys are validated before any change; values are stored as provided (no required-value check).
 
-use crate::config::validation::validate_env_key;
 use crate::config::Config;
+use crate::config::validation::validate_env_key;
 use anyhow::Result;
 
 /// Inserts or updates a global environment variable on `config`.
