@@ -5,6 +5,7 @@
 
 pub mod claude_args;
 pub mod env_vars;
+pub mod install_method;
 pub mod launch;
 pub mod profiles;
 pub mod update;
