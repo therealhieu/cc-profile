@@ -45,9 +45,9 @@ pub fn run_update_with_lookup(
     Ok(())
 }
 
-fn default_latest_tag_lookup(current: &str) -> Result<String> {
+fn default_latest_tag_lookup(_current: &str) -> Result<String> {
     #[cfg(debug_assertions)]
-    if let Some(tag) = debug_stub_latest_tag(current)? {
+    if let Some(tag) = debug_stub_latest_tag(_current)? {
         return Ok(tag);
     }
     release::fetch_latest_tag(fetch_github_release_json)
