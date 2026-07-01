@@ -42,7 +42,7 @@ The installer verifies `SHA256SUMS` before placing the binary and writes `~/.cc-
 brew install therealhieu/tap/cc-profile
 ```
 
-The canonical formula is maintained in [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) once the tap is published. This repository includes `Formula/cc-profile.rb` as a source-build template for tap maintainers.
+The canonical formula is maintained in [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap). This repository keeps `Formula/cc-profile.rb` in sync as a source-build reference for tap maintainers.
 
 ## Uninstall
 
@@ -143,7 +143,7 @@ bash tests/install_platform_mapping_test.sh
 
 ### Homebrew formula checks (macOS)
 
-When validating the template formula locally, install from a tap checkout (Homebrew rejects bare `Formula/*.rb` paths). After `therealhieu/homebrew-tap` exists:
+When validating the formula locally, install from the tap (Homebrew rejects bare `Formula/*.rb` paths):
 
 ```bash
 brew install --build-from-source therealhieu/tap/cc-profile
