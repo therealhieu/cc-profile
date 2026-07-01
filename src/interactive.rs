@@ -2,12 +2,14 @@ use crate::config::{Config, ConfigRepository, Profile};
 use crate::services::{claude_args, env_vars, launch, profiles};
 use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
+use std::io::{self, IsTerminal, Write};
 
 /// Runs the prompt-based interactive menu.
 pub fn run() -> Result<()> {
     let repository = ConfigRepository::default()?;
     loop {
         let config = repository.load()?;
+        clear_screen()?;
         println!("{}", render_main_screen(&config));
         let mut options = vec![
             "List profiles",
@@ -40,17 +42,30 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+/// Clears prior interactive output before rendering the next prompt screen.
+fn clear_screen() -> Result<()> {
+    if !io::stdout().is_terminal() {
+        return Ok(());
+    }
+    print!("\x1B[3J\x1B[2J\x1B[H");
+    io::stdout().flush()?;
+    Ok(())
+}
+
 fn render_main_screen(config: &Config) -> String {
-    let mut output = String::from("cc-profile\n\n");
+    let mut output = String::from("cc-profile\n");
+    output.push_str("────────────────────────────────────────\n");
+
     if let Some(active_name) = config.active_profile.as_deref() {
-        output.push_str(&format!("Active profile: {active_name}\n\n"));
+        output.push_str(&format!("Active profile  {active_name}\n\n"));
         if let Some(profile) = config.profiles.get(active_name) {
-            output.push_str(&format!("Endpoint: {}\n", profile.endpoint));
-            output.push_str(&format!("API key: {}\n", profile.api_key));
-            output.push_str(&format!("Fable:  {}\n", profile.fable));
-            output.push_str(&format!("Opus:   {}\n", profile.opus));
-            output.push_str(&format!("Sonnet: {}\n", profile.sonnet));
-            output.push_str(&format!("Haiku:  {}\n\n", profile.haiku));
+            output.push_str(&format!("Endpoint        {}\n", profile.endpoint));
+            output.push_str(&format!("API key         {}\n\n", profile.api_key));
+            output.push_str("Models\n");
+            output.push_str(&format!("  Fable         {}\n", profile.fable));
+            output.push_str(&format!("  Opus          {}\n", profile.opus));
+            output.push_str(&format!("  Sonnet        {}\n", profile.sonnet));
+            output.push_str(&format!("  Haiku         {}\n\n", profile.haiku));
         } else {
             output.push_str(&format!("Active profile '{active_name}' does not exist.\n"));
             output.push_str("Create or select a profile before starting Claude.\n\n");
@@ -58,14 +73,19 @@ fn render_main_screen(config: &Config) -> String {
     } else {
         output.push_str("No active profile configured.\n\n");
     }
-    output.push_str("Claude args:\n");
+
+    output.push_str("Claude args\n");
     output.push_str(&format!(
-        "--dangerously-skip-permissions: {}\n\n",
+        "  skip permissions  {}\n\n",
         config.args.dangerously_skip_permissions
     ));
-    output.push_str("Custom envs:\n");
-    for (key, value) in &config.envs {
-        output.push_str(&format!("{key}={value}\n"));
+    output.push_str("Custom envs\n");
+    if config.envs.is_empty() {
+        output.push_str("  none\n");
+    } else {
+        for (key, value) in &config.envs {
+            output.push_str(&format!("  {key}={value}\n"));
+        }
     }
     output
 }
@@ -117,6 +137,7 @@ fn profile_detail_menu(repository: &ConfigRepository, name: &str) -> Result<()> 
         let Some(profile) = config.profiles.get(name) else {
             return Ok(());
         };
+        clear_screen()?;
         println!("Profile: {name}\n");
         println!("Endpoint: {}", profile.endpoint);
         println!("API key: {}", profile.api_key);
@@ -256,6 +277,7 @@ fn apply_profile_field_update(profile: &mut Profile, field: &str, value: &str) {
 
 fn show_config_flow(repository: &ConfigRepository) -> Result<()> {
     let config = repository.load()?;
+    clear_screen()?;
     println!("Current config\n");
     println!("Config file: {}", repository.path().display());
     println!(
@@ -274,6 +296,7 @@ fn show_config_flow(repository: &ConfigRepository) -> Result<()> {
 fn args_menu(repository: &ConfigRepository) -> Result<()> {
     loop {
         let config = repository.load()?;
+        clear_screen()?;
         println!("Args\n");
         println!(
             "--dangerously-skip-permissions: {}",
@@ -301,6 +324,7 @@ fn args_menu(repository: &ConfigRepository) -> Result<()> {
 fn envs_menu(repository: &ConfigRepository) -> Result<()> {
     loop {
         let config = repository.load()?;
+        clear_screen()?;
         println!("Custom envs\n");
         for (key, value) in &config.envs {
             println!("{key}={value}");
@@ -411,9 +435,9 @@ mod tests {
     fn render_main_screen_shows_active_profile_and_unmasked_api_key() {
         let rendered = render_main_screen(&config_with_active_profile());
 
-        assert!(rendered.contains("Active profile: profile-a"));
-        assert!(rendered.contains("API key: sk-ant-secret"));
-        assert!(rendered.contains("HTTP_PROXY=http://localhost:7890"));
+        assert!(rendered.contains("Active profile  profile-a"));
+        assert!(rendered.contains("API key         sk-ant-secret"));
+        assert!(rendered.contains("  HTTP_PROXY=http://localhost:7890"));
     }
 
     #[test]
