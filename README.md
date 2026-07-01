@@ -44,7 +44,21 @@ brew install therealhieu/tap/cc-profile
 
 The canonical formula is maintained in [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) once the tap is published. This repository includes `Formula/cc-profile.rb` as a source-build template for tap maintainers.
 
-## Uninstall (standalone)
+## Uninstall
+
+### Homebrew
+
+```bash
+brew uninstall cc-profile
+```
+
+### Cargo
+
+```bash
+cargo uninstall cc-profile
+```
+
+### Standalone
 
 ```bash
 rm -f "${CC_PROFILE_INSTALL_DIR:-$HOME/.local/bin}/cc-profile"
@@ -55,7 +69,41 @@ Remove `~/.local/bin` from your `PATH` if you added it only for `cc-profile`.
 
 ## Update
 
-Self-update support is planned; use `cargo install cc-profile --force` until the built-in update command ships.
+Check for a newer release without installing:
+
+```bash
+cc-profile update --check
+```
+
+Install the latest version (interactive confirmation; use `--yes` to skip the prompt):
+
+```bash
+cc-profile update
+cc-profile update --yes
+```
+
+| Install method | What `cc-profile update` does |
+| --- | --- |
+| Homebrew | Runs `brew update` and `brew upgrade therealhieu/tap/cc-profile` |
+| Cargo | Runs `cargo install cc-profile --locked --force` |
+| Standalone | Downloads the GitHub release archive, verifies `SHA256SUMS`, then replaces the running binary |
+
+Standalone self-update never skips checksum verification. Homebrew and Cargo updates go through their package managers; `cc-profile` does not overwrite those installs by copying a downloaded binary on top of them.
+
+Interactive mode may print a once-per-day notice when a newer version exists. Disable passive checks with:
+
+```bash
+export CC_PROFILE_NO_UPDATE_CHECK=1
+```
+
+## Troubleshooting updates
+
+| Problem | What to try |
+| --- | --- |
+| Permission denied replacing the binary | Reinstall to a user-writable directory (for example `~/.local/bin`), or use `brew upgrade` / `cargo install --force` for package-manager installs |
+| Checksum mismatch | Do not force-install; retry when the release assets are fixed, or install manually from the GitHub release after verifying `SHA256SUMS` |
+| Offline or GitHub API errors | `cc-profile update --check` fails with a message; your installed binary is left unchanged |
+| Unknown install method | Use Homebrew, Cargo, or the standalone installer so `~/.cc-profile/install.toml` records `method = "standalone"` |
 
 ## Release automation
 
