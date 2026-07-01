@@ -119,28 +119,27 @@ EOF
   archive_url="https://github.com/${CC_PROFILE_REPO}/releases/download/v${version}/${asset_name}"
   sums_url="https://github.com/${CC_PROFILE_REPO}/releases/download/v${version}/SHA256SUMS"
 
-  local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "${tmp}"' EXIT
+  CC_PROFILE_TMP="$(mktemp -d)"
+  trap 'rm -rf "${CC_PROFILE_TMP:-}"' EXIT
 
-  curl -fsSL -o "${tmp}/archive.tar.gz" "${archive_url}"
-  curl -fsSL -o "${tmp}/SHA256SUMS" "${sums_url}"
-  cc_profile_verify_sha256sums "${tmp}/archive.tar.gz" "${tmp}/SHA256SUMS"
+  curl -fsSL -o "${CC_PROFILE_TMP}/${asset_name}" "${archive_url}"
+  curl -fsSL -o "${CC_PROFILE_TMP}/SHA256SUMS" "${sums_url}"
+  cc_profile_verify_sha256sums "${CC_PROFILE_TMP}/${asset_name}" "${CC_PROFILE_TMP}/SHA256SUMS"
 
-  tar -xzf "${tmp}/archive.tar.gz" -C "${tmp}"
-  if [[ ! -f "${tmp}/cc-profile" ]]; then
+  tar -xzf "${CC_PROFILE_TMP}/${asset_name}" -C "${CC_PROFILE_TMP}"
+  if [[ ! -f "${CC_PROFILE_TMP}/cc-profile" ]]; then
     echo "Archive did not contain cc-profile binary" >&2
     exit 1
   fi
-  chmod +x "${tmp}/cc-profile"
+  chmod +x "${CC_PROFILE_TMP}/cc-profile"
 
   mkdir -p "${CC_PROFILE_INSTALL_DIR}"
-  install -m 0755 "${tmp}/cc-profile" "${CC_PROFILE_INSTALL_DIR}/cc-profile"
+  install -m 0755 "${CC_PROFILE_TMP}/cc-profile" "${CC_PROFILE_INSTALL_DIR}/cc-profile"
   cc_profile_write_receipt "${version}"
 
   echo "Installed cc-profile ${version} to ${CC_PROFILE_INSTALL_DIR}/cc-profile"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-${0}}" == "${0}" ]]; then
   cc_profile_install_main "$@"
 fi
