@@ -131,30 +131,41 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "${GITHUB_REF_NAME}" -p SHA256SUMS -D .
-      - name: Render formula
+      - name: Clone tap
+        env: { GH_TOKEN: "${{ secrets.HOMEBREW_TAP_TOKEN }}" }
+        run: |
+          set -euo pipefail
+          # Clone into Homebrew's canonical Taps path so brew recognises the
+          # formula as therealhieu/tap/cc-profile. Linting/auditing in this
+          # context applies only formula cops (not generic Ruby cops that fire
+          # on a bare .rb file in CWD).
+          tap_dir="$(brew --repository)/Library/Taps/therealhieu/homebrew-tap"
+          mkdir -p "$(dirname "${tap_dir}")"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/therealhieu/homebrew-tap.git" "${tap_dir}"
+      - name: Render formula into tap
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          bash scripts/render-formula.sh "${version}" SHA256SUMS > cc-profile.rb
+          tap_dir="$(brew --repository)/Library/Taps/therealhieu/homebrew-tap"
+          mkdir -p "${tap_dir}/Formula"
+          bash scripts/render-formula.sh "${version}" SHA256SUMS > "${tap_dir}/Formula/cc-profile.rb"
       - name: Lint and audit formula (gate)
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -euo pipefail
-          brew style cc-profile.rb                    # formatting/rubocop
-          brew audit --online --formula cc-profile.rb # url/sha256/livecheck resolvable (archives are live by this job)
+          brew style therealhieu/tap/cc-profile          # formula cops only (tap context)
+          brew audit --online therealhieu/tap/cc-profile # url/sha256/livecheck resolvable (archives are live by this job)
       - name: Smoke test install (gate)
         run: |
           set -euo pipefail
-          brew install --formula ./cc-profile.rb
+          # Exact path a user hits: install the tap-qualified formula.
+          brew install therealhieu/tap/cc-profile
           cc-profile --version
-      - name: Push to tap
-        env: { GH_TOKEN: "${{ secrets.HOMEBREW_TAP_TOKEN }}" }
+      - name: Commit and push
         run: |
           set -euo pipefail
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/therealhieu/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp cc-profile.rb tap/Formula/cc-profile.rb
-          cd tap
+          tap_dir="$(brew --repository)/Library/Taps/therealhieu/homebrew-tap"
+          cd "${tap_dir}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/cc-profile.rb
