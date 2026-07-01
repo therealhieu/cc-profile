@@ -16,6 +16,7 @@ Jobs (default: run all in order):
   test           cargo test --workspace
   package        cargo package --list
   publish-dry-run  cargo publish --dry-run
+  render-formula   render Homebrew formula from SHA256SUMS
 
 Examples:
   ./scripts/ci.sh fmt test
@@ -48,7 +49,12 @@ job_publish_dry_run() {
   cargo publish --dry-run --allow-dirty
 }
 
-ALL_JOBS=(fmt clippy test package publish-dry-run)
+job_render_formula() {
+  echo "==> render-formula"
+  ./tests/render_formula_test.sh
+}
+
+ALL_JOBS=(fmt clippy test package publish-dry-run render-formula)
 
 run_job() {
   case "${1}" in
@@ -57,6 +63,7 @@ run_job() {
     test) job_test ;;
     package) job_package ;;
     publish-dry-run) job_publish_dry_run ;;
+    render-formula) job_render_formula ;;
     *)
       echo "Unknown job: ${1}" >&2
       usage >&2
