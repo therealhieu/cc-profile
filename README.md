@@ -4,13 +4,75 @@ Profile management for Claude Code endpoints and models.
 
 ## Install
 
+### Cargo
+
 ```bash
-cargo install cc-profile
+cargo install cc-profile --locked
 ```
+
+### Standalone (GitHub Releases)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/therealhieu/cc-profile/master/install.sh | sh
+```
+
+Or clone the repo and run:
+
+```bash
+./install.sh
+```
+
+Override install location:
+
+```bash
+CC_PROFILE_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+```
+
+Dry-run (no downloads or writes):
+
+```bash
+CC_PROFILE_INSTALL_DIR=/tmp/cc-profile-install ./install.sh --dry-run
+```
+
+The installer verifies `SHA256SUMS` before placing the binary and writes `~/.cc-profile/install.toml` with `method = "standalone"`.
+
+### Homebrew
+
+```bash
+brew install therealhieu/tap/cc-profile
+```
+
+The canonical formula is maintained in [`therealhieu/homebrew-tap`](https://github.com/therealhieu/homebrew-tap) once the tap is published. This repository includes `Formula/cc-profile.rb` as a source-build template for tap maintainers.
+
+## Uninstall (standalone)
+
+```bash
+rm -f "${CC_PROFILE_INSTALL_DIR:-$HOME/.local/bin}/cc-profile"
+rm -f "${CC_PROFILE_RECEIPT_DIR:-$HOME/.cc-profile}/install.toml"
+```
+
+Remove `~/.local/bin` from your `PATH` if you added it only for `cc-profile`.
 
 ## Update
 
 Self-update support is planned; use `cargo install cc-profile --force` until the built-in update command ships.
+
+## Release automation
+
+Pushing a tag `vX.Y.Z` that matches `Cargo.toml` `version` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+- Runs `./scripts/ci.sh`
+- Builds `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-unknown-linux-gnu` release archives
+- Uploads `cc-profile-vX.Y.Z-<target>.tar.gz` and `SHA256SUMS` to a GitHub Release
+- Publishes the crate to crates.io
+
+Required GitHub Actions secret:
+
+| Secret | Purpose |
+| --- | --- |
+| `CARGO_REGISTRY_TOKEN` | crates.io publish on release (create at [crates.io/settings/tokens](https://crates.io/settings/tokens)) |
+
+`GITHUB_TOKEN` is provided automatically for creating the GitHub Release.
 
 ## Development and testing
 
@@ -22,5 +84,21 @@ Run the same checks as GitHub Actions locally:
 
 Individual jobs: `fmt`, `clippy`, `test`, `package`, `publish-dry-run`. Use `./scripts/ci.sh --help` for details.
 
+Platform mapping for the standalone installer is checked by:
+
+```bash
+bash tests/install_platform_mapping_test.sh
+```
+
 - **`CC_PROFILE_CLAUDE_BIN`** — Production `cc-profile start` reads this variable and launches that executable instead of `claude` when set. Use only for trusted test or debug binaries (for example the integration-test shim); unset it after debugging so launches go back to the real Claude Code CLI.
 - **Test Claude shim** — Source lives at `tests/fixtures/cc-profile-test-claude.rs`. Integration tests compile it on demand; it is not installed with `cargo install`. The shim requires **`CC_PROFILE_TEST_CLAUDE_OUTPUT`** to point to a writable file; without it, the shim exits with an error.
+
+### Homebrew formula checks (macOS)
+
+When validating the template formula locally, install from a tap checkout (Homebrew rejects bare `Formula/*.rb` paths). After `therealhieu/homebrew-tap` exists:
+
+```bash
+brew install --build-from-source therealhieu/tap/cc-profile
+brew test cc-profile
+brew audit --strict --online therealhieu/tap/cc-profile
+```
