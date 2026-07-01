@@ -66,13 +66,19 @@ test_render_formula_substitutes_version_and_hashes() {
   if [[ "${output}" != *"1.2.3"* ]]; then
     fail "${label}" "rendered output missing version 1.2.3"
   fi
-  local hash
-  for hash in \
-    "0a78ded75877c593b1e50b9e2dbd9508fd87fbf0d6482194e10c381f607f1dc3" \
-    "ad8722c751c15195d578841dbd52f992bbb8a31d23b5c95f9ba7c979907d074b" \
-    "3a637ef9a5c561f7323746408b5f23d715a10ee1f9b78ab7c6f57973ae49f12e"; do
-    if [[ "${output}" != *"${hash}"* ]]; then
-      fail "${label}" "rendered output missing expected hash ${hash}"
+  # Assert each hash sits in the correct on_* block: the sha256 line must
+  # immediately follow the url line for its target. A placeholder-mapping swap
+  # (a hash landing in the wrong block) would put the hash on the wrong line
+  # pair and fail here, which a bare presence check would miss.
+  local pair target expected_hash
+  for pair in \
+    "aarch64-apple-darwin:0a78ded75877c593b1e50b9e2dbd9508fd87fbf0d6482194e10c381f607f1dc3" \
+    "x86_64-apple-darwin:ad8722c751c15195d578841dbd52f992bbb8a31d23b5c95f9ba7c979907d074b" \
+    "x86_64-unknown-linux-gnu:3a637ef9a5c561f7323746408b5f23d715a10ee1f9b78ab7c6f57973ae49f12e"; do
+    target="${pair%%:*}"
+    expected_hash="${pair#*:}"
+    if ! printf '%s\n' "${output}" | grep -A1 -- "${target}.tar.gz" | grep -q -- "${expected_hash}"; then
+      fail "${label}" "hash ${expected_hash} not in ${target} block"
     fi
   done
   if [[ "${output}" == *"__"*"__"* ]]; then
