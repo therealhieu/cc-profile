@@ -200,7 +200,7 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> Result<i32> {
 }
 
 fn civil_from_days(z: i32) -> (i32, u32, u32) {
-    let mut z = z + 719_468;
+    let z = z + 719_468;
     let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
