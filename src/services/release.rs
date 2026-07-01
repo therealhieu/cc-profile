@@ -83,12 +83,53 @@ pub fn select_asset_name_for_target(
         .map(|a| a.name.clone())
 }
 
+const GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/therealhieu/cc-profile/releases/latest";
+
 /// Fetches latest release tag via injectable HTTP GET (production uses GitHub API).
 pub fn fetch_latest_tag(get_json: impl FnOnce(&str) -> Result<String>) -> Result<String> {
-    const URL: &str = "https://api.github.com/repos/therealhieu/cc-profile/releases/latest";
-    let body = get_json(URL)?;
+    let body = get_json(GITHUB_LATEST_RELEASE_URL)?;
     let release = parse_latest_release_json(&body)?;
     Ok(release.tag_name)
+}
+
+/// Fetches and parses the latest GitHub release document.
+pub fn fetch_latest_release(get_json: impl FnOnce(&str) -> Result<String>) -> Result<GitHubRelease> {
+    let body = get_json(GITHUB_LATEST_RELEASE_URL)?;
+    parse_latest_release_json(&body)
+}
+
+/// Returns the browser download URL for a named release asset, if present.
+pub fn asset_download_url(release: &GitHubRelease, asset_name: &str) -> Option<String> {
+    release
+        .assets
+        .iter()
+        .find(|a| a.name == asset_name)
+        .map(|a| a.browser_download_url.clone())
+}
+
+/// Host triple used for standalone release archives (macOS arm64/x86_64, Linux x86_64).
+pub fn host_target_triple() -> Result<&'static str> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        Ok("aarch64-apple-darwin")
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        Ok("x86_64-apple-darwin")
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        Ok("x86_64-unknown-linux-gnu")
+    }
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )))]
+    {
+        anyhow::bail!("standalone update is not supported on this platform");
+    }
 }
 
 #[cfg(test)]

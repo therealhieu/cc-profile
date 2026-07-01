@@ -1,6 +1,7 @@
 mod cli;
 mod common;
 mod launch;
+mod update;
 
 #[test]
 fn crate_exports_config_module_when_initialized() {
