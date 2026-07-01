@@ -2,6 +2,9 @@
 
 use crate::services::release::{self, VersionCheckOutcome};
 use anyhow::{Context, Result, bail};
+use std::sync::OnceLock;
+use std::time::Duration;
+use ureq::Agent;
 
 /// Options for an update run.
 #[derive(Debug, Clone, Copy)]
@@ -12,14 +15,22 @@ pub struct UpdateOptions {
 
 /// Runs update or check-only flow without loading profile config.
 pub fn run_update(options: UpdateOptions) -> Result<()> {
+    run_update_with_lookup(options, default_latest_tag_lookup)
+}
+
+/// Runs update or check-only flow with an injectable latest-tag lookup (for unit tests).
+pub fn run_update_with_lookup(
+    options: UpdateOptions,
+    lookup_latest_tag: impl Fn(&str) -> Result<String>,
+) -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     if !options.check_only {
         let _ = options.skip_confirm;
         bail!("update without --check is not implemented yet");
     }
 
-    let latest_tag = lookup_latest_tag(current).context("update lookup failed")?;
-    match release::compare_versions(current, &latest_tag)? {
+    let outcome = release::check_latest_version(current, || lookup_latest_tag(current));
+    match outcome {
         VersionCheckOutcome::Current => {
             println!("cc-profile {current} is up to date.");
         }
@@ -34,24 +45,55 @@ pub fn run_update(options: UpdateOptions) -> Result<()> {
     Ok(())
 }
 
-fn lookup_latest_tag(current: &str) -> Result<String> {
-    match std::env::var("CC_PROFILE_UPDATE_LOOKUP").as_deref() {
-        Ok("stub-current") => Ok(format!("v{current}")),
-        Ok("stub-outdated") => Ok(
-            std::env::var("CC_PROFILE_UPDATE_LATEST_TAG")
-                .unwrap_or_else(|_| "v99.0.0".to_string()),
-        ),
+fn default_latest_tag_lookup(current: &str) -> Result<String> {
+    #[cfg(debug_assertions)]
+    if let Some(tag) = debug_stub_latest_tag(current)? {
+        return Ok(tag);
+    }
+    release::fetch_latest_tag(fetch_github_release_json)
+}
+
+/// Debug-build-only env stubs for integration tests against the built binary (no network).
+#[cfg(debug_assertions)]
+fn debug_stub_latest_tag(current: &str) -> Result<Option<String>> {
+    const LOOKUP_ENV: &str = "CC_PROFILE_UPDATE_LOOKUP";
+    const LATEST_TAG_ENV: &str = "CC_PROFILE_UPDATE_LATEST_TAG";
+
+    match std::env::var(LOOKUP_ENV).as_deref() {
+        Ok("stub-current") => Ok(Some(format!("v{current}"))),
+        Ok("stub-outdated") => {
+            let tag = match std::env::var(LATEST_TAG_ENV) {
+                Ok(value) if value.trim().is_empty() => "v99999.0.0".to_string(),
+                Ok(value) => value,
+                Err(_) => "v99999.0.0".to_string(),
+            };
+            Ok(Some(tag))
+        }
         Ok("stub-fail") => bail!("simulated release lookup failure"),
-        Ok(other) => bail!("unsupported CC_PROFILE_UPDATE_LOOKUP value: {other}"),
-        Err(_) => release::fetch_latest_tag(fetch_github_release_json),
+        Ok(other) => bail!("unsupported {LOOKUP_ENV} value: {other}"),
+        Err(_) => Ok(None),
     }
 }
 
+fn github_http_agent() -> &'static Agent {
+    static AGENT: OnceLock<Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .http_status_as_error(true)
+            .build()
+            .into()
+    })
+}
+
 fn fetch_github_release_json(url: &str) -> Result<String> {
-    let mut response = ureq::get(url)
+    let mut response = github_http_agent()
+        .get(url)
         .header("User-Agent", "cc-profile")
+        .header("Accept", "application/vnd.github+json")
         .call()
-        .with_context(|| "request failed for release metadata".to_string())?;
+        .map_err(map_ureq_error)
+        .with_context(|| format!("request failed for release metadata at {url}"))?;
     response
         .body_mut()
         .read_to_string()
@@ -59,49 +101,41 @@ fn fetch_github_release_json(url: &str) -> Result<String> {
         .context("read release response body")
 }
 
+fn map_ureq_error(err: ureq::Error) -> anyhow::Error {
+    match err {
+        ureq::Error::StatusCode(code) => {
+            anyhow::anyhow!("GitHub API returned HTTP status {code}")
+        }
+        other => anyhow::anyhow!(other),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
 
-    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_update_env_tests() -> MutexGuard<'static, ()> {
-        ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    #[test]
+    fn check_reports_outdated_with_injected_lookup() {
+        run_update_with_lookup(
+            UpdateOptions {
+                check_only: true,
+                skip_confirm: false,
+            },
+            |_current| Ok("v0.2.0".to_string()),
+        )
+        .expect("check should succeed");
     }
 
     #[test]
-    fn check_reports_outdated_with_stub_outdated() {
-        let _guard = lock_update_env_tests();
-        unsafe {
-            std::env::set_var("CC_PROFILE_UPDATE_LOOKUP", "stub-outdated");
-            std::env::set_var("CC_PROFILE_UPDATE_LATEST_TAG", "v0.2.0");
-        }
-        let result = run_update(UpdateOptions {
-            check_only: true,
-            skip_confirm: false,
-        });
-        unsafe {
-            std::env::remove_var("CC_PROFILE_UPDATE_LOOKUP");
-            std::env::remove_var("CC_PROFILE_UPDATE_LATEST_TAG");
-        }
-        result.expect("check should succeed");
-    }
-
-    #[test]
-    fn check_fails_closed_when_stub_fail() {
-        let _guard = lock_update_env_tests();
-        unsafe {
-            std::env::set_var("CC_PROFILE_UPDATE_LOOKUP", "stub-fail");
-        }
-        let err = run_update(UpdateOptions {
-            check_only: true,
-            skip_confirm: false,
-        })
+    fn check_fails_closed_when_injected_lookup_fails() {
+        let err = run_update_with_lookup(
+            UpdateOptions {
+                check_only: true,
+                skip_confirm: false,
+            },
+            |_current| bail!("simulated release lookup failure"),
+        )
         .expect_err("lookup should fail");
-        unsafe {
-            std::env::remove_var("CC_PROFILE_UPDATE_LOOKUP");
-        }
         let message = format!("{err:#}");
         assert!(
             message.contains("simulated"),

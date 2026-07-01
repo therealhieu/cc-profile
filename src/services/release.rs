@@ -31,6 +31,28 @@ pub fn compare_versions(current: &str, latest_tag: &str) -> Result<VersionCheckO
     }
 }
 
+/// Fetches the latest tag and compares it to `current`, mapping errors to [`VersionCheckOutcome::LookupFailed`].
+pub fn check_latest_version(
+    current: &str,
+    lookup_latest_tag: impl FnOnce() -> Result<String>,
+) -> VersionCheckOutcome {
+    let latest_tag = match lookup_latest_tag() {
+        Ok(tag) => tag,
+        Err(err) => {
+            return VersionCheckOutcome::LookupFailed {
+                message: format!("{err:#}"),
+            };
+        }
+    };
+
+    match compare_versions(current, &latest_tag) {
+        Ok(outcome) => outcome,
+        Err(err) => VersionCheckOutcome::LookupFailed {
+            message: format!("{err:#}"),
+        },
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct GitHubRelease {
     pub tag_name: String,
@@ -49,7 +71,10 @@ pub fn parse_latest_release_json(body: &str) -> Result<GitHubRelease> {
 }
 
 /// Selects the release archive asset name for a Rust target triple.
-pub fn select_asset_name_for_target(release: &GitHubRelease, target_triple: &str) -> Option<String> {
+pub fn select_asset_name_for_target(
+    release: &GitHubRelease,
+    target_triple: &str,
+) -> Option<String> {
     let suffix = format!("-{target_triple}.tar.gz");
     release
         .assets
@@ -100,6 +125,28 @@ mod tests {
     }
 
     #[test]
+    fn check_latest_version_reports_lookup_failed_on_fetch_error() {
+        let outcome = check_latest_version("0.1.0", || {
+            anyhow::bail!("simulated network failure");
+        });
+        assert_eq!(
+            outcome,
+            VersionCheckOutcome::LookupFailed {
+                message: "simulated network failure".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn check_latest_version_reports_lookup_failed_on_malformed_tag() {
+        let outcome = check_latest_version("0.1.0", || Ok("not-a-version".to_string()));
+        assert!(matches!(
+            outcome,
+            VersionCheckOutcome::LookupFailed { message } if message.contains("invalid latest version")
+        ));
+    }
+
+    #[test]
     fn parse_release_json_and_select_asset_by_target() {
         let json = r#"{
             "tag_name": "v0.2.0",
@@ -110,17 +157,29 @@ mod tests {
         }"#;
         let release = parse_latest_release_json(json).expect("parse");
         assert_eq!(release.tag_name, "v0.2.0");
-        let name = select_asset_name_for_target(&release, "aarch64-apple-darwin")
-            .expect("asset");
+        let name = select_asset_name_for_target(&release, "aarch64-apple-darwin").expect("asset");
         assert_eq!(name, "cc-profile-v0.2.0-aarch64-apple-darwin.tar.gz");
     }
 
     #[test]
+    fn select_asset_returns_none_when_target_triple_missing() {
+        let json = r#"{
+            "tag_name": "v0.2.0",
+            "assets": [
+                {"name": "cc-profile-v0.2.0-aarch64-apple-darwin.tar.gz", "browser_download_url": "https://example.com/aarch64"}
+            ]
+        }"#;
+        let release = parse_latest_release_json(json).expect("parse");
+        assert_eq!(
+            select_asset_name_for_target(&release, "x86_64-unknown-linux-gnu"),
+            None
+        );
+    }
+
+    #[test]
     fn fetch_latest_tag_uses_injected_client() {
-        let tag = fetch_latest_tag(|_url| {
-            Ok(r#"{"tag_name":"v0.3.0","assets":[]}"#.to_string())
-        })
-        .expect("fetch");
+        let tag = fetch_latest_tag(|_url| Ok(r#"{"tag_name":"v0.3.0","assets":[]}"#.to_string()))
+            .expect("fetch");
         assert_eq!(tag, "v0.3.0");
     }
 }
