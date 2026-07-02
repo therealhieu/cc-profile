@@ -349,7 +349,6 @@ fn start_command(repository: &ConfigRepository) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, Profile};
     use std::collections::BTreeMap;
 
     fn sample_profile() -> Profile {
@@ -404,7 +403,7 @@ mod tests {
 
         // A profile literally named "foo  active" must keep its raw name intact
         // (not mangled by stripping a "  active" suffix), while the actually-active
-        // profile gets the " active" label appended.
+        // profile gets the "  active" label appended.
         assert_eq!(entries[0].name, "foo  active");
         assert_eq!(entries[0].label, "foo  active");
         assert_eq!(entries[1].name, "profile-a");
@@ -457,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn use_profile_interactively_errors_without_writing_when_no_profiles() {
+    fn ensure_selectable_rejects_empty_config_without_writing() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("config.toml");
         let repository = ConfigRepository::new(path.clone());
