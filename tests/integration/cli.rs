@@ -94,6 +94,38 @@ fn use_command_sets_active_profile() {
 }
 
 #[test]
+fn use_command_requires_interactive_terminal_when_profile_omitted() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    write_config(&temp);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .arg("use")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("<PROFILE>").not())
+        .stderr(predicate::str::contains("requires an interactive terminal"));
+}
+
+#[test]
+fn use_command_reports_no_profiles_without_writing_when_profile_omitted_and_none_configured() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    let config = temp.child(".cc-profile/config.toml");
+    config.write_str("version = 1\n").expect("write config");
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .arg("use")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no profiles configured"));
+
+    config.assert(predicate::str::contains("active_profile = ").not());
+}
+
+#[test]
 fn show_prints_config_with_unmasked_api_key() {
     let temp = assert_fs::TempDir::new().expect("tempdir");
     write_config(&temp);
