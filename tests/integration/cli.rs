@@ -94,7 +94,7 @@ fn use_command_sets_active_profile() {
 }
 
 #[test]
-fn use_command_reports_stub_error_when_profile_omitted() {
+fn use_command_requires_interactive_terminal_when_profile_omitted() {
     let temp = assert_fs::TempDir::new().expect("tempdir");
     write_config(&temp);
 
@@ -105,9 +105,7 @@ fn use_command_reports_stub_error_when_profile_omitted() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("<PROFILE>").not())
-        .stderr(predicate::str::contains(
-            "interactive profile selection is not yet implemented",
-        ));
+        .stderr(predicate::str::contains("requires an interactive terminal"));
 }
 
 #[test]

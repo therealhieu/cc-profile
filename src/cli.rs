@@ -1,10 +1,11 @@
 //! Command-line interface for `cc-profile`: argument parsing and dispatch.
 
-use crate::config::{ConfigRepository, Profile};
+use crate::config::{Config, ConfigRepository, Profile};
 use crate::interactive;
 use crate::services::{launch, profiles, update};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::io::IsTerminal;
 
 /// Root CLI definition; subcommands are optional (no subcommand runs interactive mode).
 #[derive(Debug, Parser)]
@@ -163,10 +164,75 @@ fn use_profile(repository: &ConfigRepository, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Temporary stub for `cc-profile use` without a profile argument; the interactive selector is a
-/// later task.
-fn use_profile_interactively(_repository: &ConfigRepository) -> Result<()> {
-    anyhow::bail!("interactive profile selection is not yet implemented")
+/// A selectable profile: the raw config key plus its display label. Binding the
+/// raw name to its label in one value means a profile literally named
+/// "foo  active" can't be mangled by stripping a suffix off the label.
+struct ProfileSelectionEntry {
+    name: String,
+    label: String,
+}
+
+/// Builds the selectable profile entries in deterministic (BTreeMap key) order.
+/// The active profile's label gets a "  active" suffix; all others use the raw name.
+fn profile_selection_entries(config: &Config) -> Vec<ProfileSelectionEntry> {
+    config
+        .profiles
+        .keys()
+        .map(|name| {
+            let label = if config.active_profile.as_deref() == Some(name.as_str()) {
+                format!("{name}  active")
+            } else {
+                name.clone()
+            };
+            ProfileSelectionEntry {
+                name: name.clone(),
+                label,
+            }
+        })
+        .collect()
+}
+
+/// Default selection index: the active profile's position when it exists in the
+/// entries, otherwise 0. This also covers a stale active profile (set but absent
+/// from `profiles`).
+fn default_profile_index(config: &Config, entries: &[ProfileSelectionEntry]) -> usize {
+    config
+        .active_profile
+        .as_deref()
+        .and_then(|active| entries.iter().position(|entry| entry.name == active))
+        .unwrap_or(0)
+}
+
+/// Fails before any interactive prompt when there are no profiles to choose from.
+fn ensure_selectable(config: &Config) -> Result<()> {
+    if config.profiles.is_empty() {
+        anyhow::bail!("no profiles configured; create one with `cc-profile new` first");
+    }
+    Ok(())
+}
+
+/// Interactive `cc-profile use` selector for the missing-profile path.
+fn use_profile_interactively(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    ensure_selectable(&config)?;
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "`cc-profile use` requires an interactive terminal; pass a profile name instead"
+        );
+    }
+
+    let entries = profile_selection_entries(&config);
+    let default_index = default_profile_index(&config, &entries);
+    let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
+    let selection = dialoguer::Select::new()
+        .with_prompt("Select a profile")
+        .items(&labels)
+        .default(default_index)
+        .interact_opt()?;
+    match selection {
+        Some(index) => use_profile(repository, &entries[index].name),
+        None => Ok(()),
+    }
 }
 
 fn show_config(repository: &ConfigRepository) -> Result<()> {
@@ -278,4 +344,140 @@ fn delete_profile_command(repository: &ConfigRepository, name: &str) -> Result<(
 fn start_command(repository: &ConfigRepository) -> Result<()> {
     let config = repository.load()?;
     launch::start_claude(&config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, Profile};
+    use std::collections::BTreeMap;
+
+    fn sample_profile() -> Profile {
+        Profile::builder()
+            .endpoint("https://api.anthropic.com".to_string())
+            .api_key("sk-ant-secret".to_string())
+            .fable("claude-fable-5".to_string())
+            .opus("claude-opus-4-8".to_string())
+            .sonnet("claude-sonnet-4-6".to_string())
+            .haiku("claude-haiku-4-5-20251001".to_string())
+            .build()
+    }
+
+    fn config_with_active_profile() -> Config {
+        Config {
+            active_profile: Some("profile-a".to_string()),
+            profiles: BTreeMap::from([("profile-a".to_string(), sample_profile())]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn profile_selection_entries_include_every_profile_in_btreemap_order() {
+        let config = Config {
+            active_profile: None,
+            profiles: BTreeMap::from([
+                ("profile-b".to_string(), sample_profile()),
+                ("profile-a".to_string(), sample_profile()),
+            ]),
+            ..Default::default()
+        };
+
+        let names: Vec<String> = profile_selection_entries(&config)
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+
+        assert_eq!(
+            names,
+            vec!["profile-a".to_string(), "profile-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn profile_selection_entries_bind_name_to_label_without_parsing() {
+        let mut config = config_with_active_profile();
+        config
+            .profiles
+            .insert("foo  active".to_string(), sample_profile());
+
+        let entries = profile_selection_entries(&config);
+
+        // A profile literally named "foo  active" must keep its raw name intact
+        // (not mangled by stripping a "  active" suffix), while the actually-active
+        // profile gets the " active" label appended.
+        assert_eq!(entries[0].name, "foo  active");
+        assert_eq!(entries[0].label, "foo  active");
+        assert_eq!(entries[1].name, "profile-a");
+        assert_eq!(entries[1].label, "profile-a  active");
+    }
+
+    #[test]
+    fn default_profile_index_points_at_active_profile_when_present() {
+        let config = Config {
+            active_profile: Some("profile-b".to_string()),
+            profiles: BTreeMap::from([
+                ("profile-a".to_string(), sample_profile()),
+                ("profile-b".to_string(), sample_profile()),
+            ]),
+            ..Default::default()
+        };
+        let entries = profile_selection_entries(&config);
+
+        assert_eq!(default_profile_index(&config, &entries), 1);
+    }
+
+    #[test]
+    fn default_profile_index_is_zero_when_no_active_profile() {
+        let config = Config {
+            active_profile: None,
+            profiles: BTreeMap::from([
+                ("profile-a".to_string(), sample_profile()),
+                ("profile-b".to_string(), sample_profile()),
+            ]),
+            ..Default::default()
+        };
+        let entries = profile_selection_entries(&config);
+
+        assert_eq!(default_profile_index(&config, &entries), 0);
+    }
+
+    #[test]
+    fn default_profile_index_is_zero_when_active_profile_is_stale() {
+        let config = Config {
+            active_profile: Some("missing".to_string()),
+            profiles: BTreeMap::from([
+                ("profile-a".to_string(), sample_profile()),
+                ("profile-b".to_string(), sample_profile()),
+            ]),
+            ..Default::default()
+        };
+        let entries = profile_selection_entries(&config);
+
+        assert_eq!(default_profile_index(&config, &entries), 0);
+    }
+
+    #[test]
+    fn use_profile_interactively_errors_without_writing_when_no_profiles() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("config.toml");
+        let repository = ConfigRepository::new(path.clone());
+
+        let error = repository
+            .load()
+            .and_then(|config| {
+                // Guard is asserted directly against the empty config: the empty
+                // check must fire before any dialoguer/TTY interaction.
+                ensure_selectable(&config)
+            })
+            .expect_err("empty config should be rejected");
+
+        assert!(
+            error.to_string().contains("no profiles configured"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !path.exists(),
+            "no config file should be written for empty selection"
+        );
+    }
 }
