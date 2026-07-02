@@ -3,6 +3,8 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 /// Resolved program, arguments, and environment for launching Claude Code.
@@ -91,14 +93,37 @@ pub fn run_command_spec(spec: &CommandSpec) -> Result<()> {
     Ok(())
 }
 
-/// Builds a command spec from `config` and runs Claude Code.
+/// Builds a command spec from `config` and replaces this process with Claude Code.
 ///
 /// # Errors
 ///
-/// Returns an error from [`build_command_spec`] or [`run_command_spec`].
+/// Returns an error from [`build_command_spec`] or when executing Claude Code fails before the
+/// process image is replaced.
 pub fn start_claude(config: &Config) -> Result<()> {
+    start_claude_with_launcher(config, exec_command_spec)
+}
+
+fn start_claude_with_launcher<F>(config: &Config, launch: F) -> Result<()>
+where
+    F: FnOnce(&CommandSpec) -> Result<()>,
+{
     let spec = build_command_spec(config)?;
-    run_command_spec(&spec)
+    launch(&spec)
+}
+
+#[cfg(unix)]
+fn exec_command_spec(spec: &CommandSpec) -> Result<()> {
+    let error = Command::new(&spec.program)
+        .args(&spec.args)
+        .envs(&spec.envs)
+        .exec();
+
+    Err(error).with_context(|| {
+        format!(
+            "Could not find `{}` on PATH. Please install Claude Code or ensure the `{}` command is available.",
+            spec.program, spec.program
+        )
+    })
 }
 
 #[cfg(test)]
@@ -223,6 +248,35 @@ mod tests {
                 .to_string()
                 .contains("Active profile 'missing-profile' does not exist")
         );
+    }
+
+    #[test]
+    fn start_claude_with_launcher_invokes_launcher_with_built_spec() {
+        let expected_spec = build_command_spec(&active_config(true)).expect("spec should build");
+        let captured = std::cell::RefCell::new(None);
+
+        start_claude_with_launcher(&active_config(true), |spec| {
+            *captured.borrow_mut() = Some(spec.clone());
+            Ok(())
+        })
+        .expect("launcher should receive spec");
+
+        assert_eq!(captured.into_inner(), Some(expected_spec));
+    }
+
+    #[test]
+    fn exec_command_spec_returns_context_when_exec_fails() {
+        let spec = CommandSpec {
+            program: "cc-profile-definitely-missing-claude-bin".to_string(),
+            args: Vec::new(),
+            envs: BTreeMap::new(),
+        };
+
+        let error = exec_command_spec(&spec).expect_err("exec should fail for missing program");
+
+        assert!(error.to_string().contains(
+            "Could not find `cc-profile-definitely-missing-claude-bin` on PATH. Please install Claude Code or ensure the `cc-profile-definitely-missing-claude-bin` command is available."
+        ));
     }
 
     #[test]
