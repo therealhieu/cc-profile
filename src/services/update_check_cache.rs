@@ -153,6 +153,83 @@ mod tests {
         ));
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: these tests hold `lock_cc_profile_update_check_env()`.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: these tests hold `lock_cc_profile_update_check_env()`.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: these tests hold `lock_cc_profile_update_check_env()`.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn default_cache_path_uses_explicit_debug_override_when_set() {
+        let _lock = lock_cc_profile_update_check_env();
+        let _cache_path = EnvVarGuard::set(
+            "CC_PROFILE_UPDATE_CHECK_CACHE_PATH",
+            "/tmp/custom-update-check.toml",
+        );
+
+        assert_eq!(
+            default_cache_path(),
+            Some(PathBuf::from("/tmp/custom-update-check.toml"))
+        );
+    }
+
+    #[test]
+    fn default_cache_path_uses_receipt_dir_when_override_is_blank() {
+        let _lock = lock_cc_profile_update_check_env();
+        let _cache_path = EnvVarGuard::set("CC_PROFILE_UPDATE_CHECK_CACHE_PATH", "  ");
+        let _receipt_dir = EnvVarGuard::set("CC_PROFILE_RECEIPT_DIR", "/tmp/cc-profile-receipts");
+
+        assert_eq!(
+            default_cache_path(),
+            Some(PathBuf::from("/tmp/cc-profile-receipts/update-check.toml"))
+        );
+    }
+
+    #[test]
+    fn default_cache_path_uses_home_cc_profile_when_env_overrides_are_absent() {
+        let _lock = lock_cc_profile_update_check_env();
+        let _cache_path = EnvVarGuard::clear("CC_PROFILE_UPDATE_CHECK_CACHE_PATH");
+        let _receipt_dir = EnvVarGuard::clear("CC_PROFILE_RECEIPT_DIR");
+        let home = dirs::home_dir().expect("home dir");
+
+        assert_eq!(
+            default_cache_path(),
+            Some(home.join(".cc-profile").join("update-check.toml"))
+        );
+    }
+
     #[test]
     fn update_check_cache_read_write_round_trip() {
         use assert_fs::TempDir;
