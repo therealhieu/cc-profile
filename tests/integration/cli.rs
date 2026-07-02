@@ -94,6 +94,23 @@ fn use_command_sets_active_profile() {
 }
 
 #[test]
+fn use_command_reports_stub_error_when_profile_omitted() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    write_config(&temp);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .arg("use")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("<PROFILE>").not())
+        .stderr(predicate::str::contains(
+            "interactive profile selection is not yet implemented",
+        ));
+}
+
+#[test]
 fn show_prints_config_with_unmasked_api_key() {
     let temp = assert_fs::TempDir::new().expect("tempdir");
     write_config(&temp);

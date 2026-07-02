@@ -24,7 +24,7 @@ pub enum Command {
     Start,
     List,
     Use {
-        profile: String,
+        profile: Option<String>,
     },
     Show,
     New {
@@ -83,7 +83,10 @@ pub fn run() -> Result<()> {
     match cli.command {
         None => interactive::run(),
         Some(Command::List) => list_profiles(&repository),
-        Some(Command::Use { profile }) => use_profile(&repository, &profile),
+        Some(Command::Use { profile }) => match profile {
+            Some(profile) => use_profile(&repository, &profile),
+            None => use_profile_interactively(&repository),
+        },
         Some(Command::Show) => show_config(&repository),
         Some(Command::Start) => start_command(&repository),
         Some(Command::New {
@@ -158,6 +161,12 @@ fn use_profile(repository: &ConfigRepository, name: &str) -> Result<()> {
     repository.update(|config| profiles::set_active_profile(config, name))?;
     println!("Profile \"{name}\" is now active.");
     Ok(())
+}
+
+/// Temporary stub for `cc-profile use` without a profile argument; the interactive selector is a
+/// later task.
+fn use_profile_interactively(_repository: &ConfigRepository) -> Result<()> {
+    anyhow::bail!("interactive profile selection is not yet implemented")
 }
 
 fn show_config(repository: &ConfigRepository) -> Result<()> {
