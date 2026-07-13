@@ -56,7 +56,45 @@ fn help_lists_core_commands() {
         .stdout(predicate::str::contains("start"))
         .stdout(predicate::str::contains("list"))
         .stdout(predicate::str::contains("use"))
-        .stdout(predicate::str::contains("show"));
+        .stdout(predicate::str::contains("show"))
+        .stdout(predicate::str::contains("show-command"));
+}
+
+#[test]
+fn show_command_prints_runnable_command_line() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    write_config(&temp);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .arg("show-command")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "ANTHROPIC_BASE_URL='https://api.anthropic.com'",
+        ))
+        .stdout(predicate::str::contains(
+            "ANTHROPIC_API_KEY='sk-ant-secret'",
+        ))
+        .stdout(predicate::str::contains(
+            "ANTHROPIC_DEFAULT_FABLE_MODEL='claude-fable-5'",
+        ))
+        .stdout(predicate::str::contains("claude"))
+        .stdout(predicate::str::contains("--dangerously-skip-permissions").not());
+}
+
+#[test]
+fn show_command_errors_without_active_profile() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .arg("show-command")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No active profile is set"));
 }
 
 #[test]

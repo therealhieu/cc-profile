@@ -28,6 +28,7 @@ pub enum Command {
         profile: Option<String>,
     },
     Show,
+    ShowCommand,
     New {
         #[arg(long)]
         name: String,
@@ -89,6 +90,7 @@ pub fn run() -> Result<()> {
             None => use_profile_interactively(&repository),
         },
         Some(Command::Show) => show_config(&repository),
+        Some(Command::ShowCommand) => show_command(&repository),
         Some(Command::Start) => start_command(&repository),
         Some(Command::New {
             name,
@@ -344,6 +346,13 @@ fn delete_profile_command(repository: &ConfigRepository, name: &str) -> Result<(
 fn start_command(repository: &ConfigRepository) -> Result<()> {
     let config = repository.load()?;
     launch::start_claude(&config)
+}
+
+fn show_command(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    let spec = launch::build_command_spec(&config)?;
+    println!("{}", launch::render_command_line(&spec));
+    Ok(())
 }
 
 #[cfg(test)]
