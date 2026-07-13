@@ -72,13 +72,11 @@ fn show_command_prints_runnable_command_line() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "ANTHROPIC_BASE_URL='https://api.anthropic.com'",
+            "ANTHROPIC_BASE_URL=https://api.anthropic.com",
         ))
+        .stdout(predicate::str::contains("ANTHROPIC_API_KEY=sk-ant-secret"))
         .stdout(predicate::str::contains(
-            "ANTHROPIC_API_KEY='sk-ant-secret'",
-        ))
-        .stdout(predicate::str::contains(
-            "ANTHROPIC_DEFAULT_FABLE_MODEL='claude-fable-5'",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5",
         ))
         .stdout(predicate::str::contains("claude"))
         .stdout(predicate::str::contains("--dangerously-skip-permissions").not());

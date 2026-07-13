@@ -69,11 +69,23 @@ pub(crate) fn build_command_spec_with_program(
     })
 }
 
-/// POSIX single-quote escaping — the only safe way to quote arbitrary values.
+/// POSIX shell quoting: returns `value` unquoted when it consists only of characters
+/// no shell interprets, otherwise wraps it in single quotes.
 ///
-/// A literal `'` becomes `'\''`: close the quote, emit an escaped quote, reopen the quote.
+/// The safe set matches Python's `shlex.quote` (`[A-Za-z0-9_@%+=:,./-]`), so barewords like
+/// `claude`, `--dangerously-skip-permissions`, and `https://api.anthropic.com` stay unquoted while
+/// values with globs, spaces, or quotes are escaped. A literal `'` becomes `'\''`: close the quote,
+/// emit an escaped quote, reopen the quote.
 fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
+    let is_safe = !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b));
+    if is_safe {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', r"'\''"))
+    }
 }
 
 /// Renders `spec` as a single copy-pasteable shell command line:
@@ -307,8 +319,21 @@ mod tests {
     }
 
     #[test]
-    fn shell_quote_wraps_plain_value_in_single_quotes() {
-        assert_eq!(shell_quote("sk-ant-secret"), "'sk-ant-secret'");
+    fn shell_quote_leaves_safe_value_unquoted() {
+        assert_eq!(shell_quote("sk-ant-secret"), "sk-ant-secret");
+        assert_eq!(
+            shell_quote("https://api.anthropic.com"),
+            "https://api.anthropic.com"
+        );
+    }
+
+    #[test]
+    fn shell_quote_quotes_value_with_shell_special_chars() {
+        assert_eq!(
+            shell_quote("claude-opus-4.8-thinking[1m]"),
+            "'claude-opus-4.8-thinking[1m]'"
+        );
+        assert_eq!(shell_quote(""), "''");
     }
 
     #[test]
@@ -322,14 +347,14 @@ mod tests {
 
         assert_eq!(
             render_command_line(&spec),
-            "ANTHROPIC_API_KEY='sk-ant-profile' \
-             ANTHROPIC_BASE_URL='https://api.anthropic.com' \
-             ANTHROPIC_DEFAULT_FABLE_MODEL='claude-fable-5' \
-             ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-haiku-4-5-20251001' \
-             ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-4-8' \
-             ANTHROPIC_DEFAULT_SONNET_MODEL='claude-sonnet-4-6' \
-             HTTP_PROXY='http://localhost:7890' \
-             'claude' '--dangerously-skip-permissions'"
+            "ANTHROPIC_API_KEY=sk-ant-profile \
+             ANTHROPIC_BASE_URL=https://api.anthropic.com \
+             ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5 \
+             ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5-20251001 \
+             ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-8 \
+             ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-6 \
+             HTTP_PROXY=http://localhost:7890 \
+             claude --dangerously-skip-permissions"
         );
     }
 
@@ -340,8 +365,8 @@ mod tests {
 
         let rendered = render_command_line(&spec);
         assert!(
-            rendered.ends_with("'claude'"),
-            "expected rendered line to end with 'claude', got: {rendered}"
+            rendered.ends_with("claude"),
+            "expected rendered line to end with claude, got: {rendered}"
         );
     }
 }
