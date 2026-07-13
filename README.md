@@ -142,6 +142,7 @@ haiku = "claude-haiku-4.5"
 | `cc-profile list` | List profiles, marking the active one |
 | `cc-profile use <name>` | Set the active profile |
 | `cc-profile show` | Print the current config and its file path |
+| `cc-profile show-command` | Print the exact shell command (`ANTHROPIC_* … claude`) that `start` would run for the active profile |
 | `cc-profile new --name … --endpoint … --api-key … --fable … --opus … --sonnet … --haiku … [--active]` | Create a profile |
 | `cc-profile edit <name> [--endpoint …] [--api-key …] [--fable …] [--opus …] [--sonnet …] [--haiku …] [--rename …]` | Update fields on a profile |
 | `cc-profile delete <name>` | Delete a profile |
