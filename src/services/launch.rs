@@ -69,6 +69,26 @@ pub(crate) fn build_command_spec_with_program(
     })
 }
 
+/// POSIX single-quote escaping — the only safe way to quote arbitrary values.
+///
+/// A literal `'` becomes `'\''`: close the quote, emit an escaped quote, reopen the quote.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Renders `spec` as a single copy-pasteable shell command line:
+/// `KEY='v' KEY2='v2' <program> <arg>...`, envs in `spec.envs` (sorted) order.
+pub fn render_command_line(spec: &CommandSpec) -> String {
+    let mut parts: Vec<String> = spec
+        .envs
+        .iter()
+        .map(|(k, v)| format!("{k}={}", shell_quote(v)))
+        .collect();
+    parts.push(shell_quote(&spec.program));
+    parts.extend(spec.args.iter().map(|a| shell_quote(a)));
+    parts.join(" ")
+}
+
 /// Spawns `spec.program` with `spec.args` and `spec.envs`, waiting for exit.
 ///
 /// # Errors
@@ -284,5 +304,44 @@ mod tests {
         let error = start_claude(&Config::default())
             .expect_err("start should fail before launching claude");
         assert!(error.to_string().contains("No active profile is set"));
+    }
+
+    #[test]
+    fn shell_quote_wraps_plain_value_in_single_quotes() {
+        assert_eq!(shell_quote("sk-ant-secret"), "'sk-ant-secret'");
+    }
+
+    #[test]
+    fn shell_quote_escapes_embedded_single_quote() {
+        assert_eq!(shell_quote("a'b"), r"'a'\''b'");
+    }
+
+    #[test]
+    fn render_command_line_renders_sorted_envs_program_and_args() {
+        let spec = build_command_spec(&active_config(true)).expect("spec should build");
+
+        assert_eq!(
+            render_command_line(&spec),
+            "ANTHROPIC_API_KEY='sk-ant-profile' \
+             ANTHROPIC_BASE_URL='https://api.anthropic.com' \
+             ANTHROPIC_DEFAULT_FABLE_MODEL='claude-fable-5' \
+             ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-haiku-4-5-20251001' \
+             ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-4-8' \
+             ANTHROPIC_DEFAULT_SONNET_MODEL='claude-sonnet-4-6' \
+             HTTP_PROXY='http://localhost:7890' \
+             'claude' '--dangerously-skip-permissions'"
+        );
+    }
+
+    #[test]
+    fn render_command_line_emits_no_args_when_spec_args_empty() {
+        let spec = build_command_spec(&active_config(false)).expect("spec should build");
+        assert!(spec.args.is_empty());
+
+        let rendered = render_command_line(&spec);
+        assert!(
+            rendered.ends_with("'claude'"),
+            "expected rendered line to end with 'claude', got: {rendered}"
+        );
     }
 }
