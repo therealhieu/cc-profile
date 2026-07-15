@@ -68,8 +68,10 @@ pub(crate) fn build_command_spec_with_program(
 
 /// Builds a [`CommandSpec`] for Codex from the active profile's name and opus model.
 ///
-/// Program comes from `CC_PROFILE_CODEX_BIN` when set, otherwise `"codex"`. Args are exactly
-/// `["-c", "model_provider=\"<name>\"", "--model", "<opus>"]` with an empty env map.
+/// Program comes from `CC_PROFILE_CODEX_BIN` when set, otherwise `"codex"`. Args always
+/// include `["-c", "model_provider=\"<name>\"", "--model", "<bare-opus>"]` and, when the
+/// opus id carries a known trailing context marker such as `[1m]` or `[256k]`, also
+/// `["-c", "model_context_window=<tokens>"]`. The env map is empty.
 ///
 /// # Errors
 ///
@@ -87,26 +89,38 @@ pub(crate) fn build_codex_command_spec_with_program(
     program_override: Option<String>,
 ) -> Result<CommandSpec> {
     let (name, profile) = resolve_active_profile(config)?;
+    let (model, window) = parse_context_marker(&profile.opus);
+    let mut args = vec![
+        "-c".into(),
+        format!("model_provider=\"{name}\""),
+        "--model".into(),
+        model.to_string(),
+    ];
+    if let Some(tokens) = window {
+        args.push("-c".into());
+        args.push(format!("model_context_window={tokens}"));
+    }
     Ok(CommandSpec {
         program: program_override.unwrap_or_else(|| "codex".into()),
-        args: vec![
-            "-c".into(),
-            format!("model_provider=\"{name}\""),
-            "--model".into(),
-            strip_context_marker(&profile.opus).to_string(),
-        ],
+        args,
         envs: BTreeMap::new(),
     })
 }
 
-/// Codex doesn't understand the proxy's `[1m]`-style context markers, so strip a
-/// single trailing bracketed group (`[...]`) from the model id; ids without one are
-/// returned unchanged. Plain `match` (no let-chain) to respect the repo MSRV 1.85.
-fn strip_context_marker(model: &str) -> &str {
-    match model.rfind('[') {
-        Some(i) if model.ends_with(']') => &model[..i],
-        _ => model,
-    }
+/// Proxy markers like `[1m]` are not Codex model ids. Strip a trailing `[...]`
+/// and, for known sizes, return the token count Codex should use via
+/// `-c model_context_window=…`. Plain `match` (no let-chain) for MSRV 1.85.
+fn parse_context_marker(model: &str) -> (&str, Option<u64>) {
+    let (bare, marker) = match model.rfind('[') {
+        Some(i) if model.ends_with(']') => (&model[..i], Some(&model[i + 1..model.len() - 1])),
+        _ => (model, None),
+    };
+    let window = match marker {
+        Some(m) if m.eq_ignore_ascii_case("1m") => Some(1_000_000),
+        Some(m) if m.eq_ignore_ascii_case("256k") => Some(256_000),
+        _ => None,
+    };
+    (bare, window)
 }
 
 fn resolve_active_profile(config: &Config) -> Result<(&str, &Profile)> {
@@ -300,42 +314,70 @@ mod tests {
     }
 
     #[test]
-    fn strip_context_marker_removes_trailing_bracket_group() {
+    fn parse_context_marker_maps_1m_to_one_million_tokens() {
         assert_eq!(
-            strip_context_marker("claude-opus-4.8-thinking[1m]"),
-            "claude-opus-4.8-thinking"
+            parse_context_marker("gpt-5.6-sol-thinking[1m]"),
+            ("gpt-5.6-sol-thinking", Some(1_000_000))
         );
     }
 
     #[test]
-    fn strip_context_marker_removes_marker_from_slashed_id() {
+    fn parse_context_marker_maps_256k_to_two_hundred_fifty_six_thousand_tokens() {
         assert_eq!(
-            strip_context_marker("kr/claude-opus-4.8[1m]"),
-            "kr/claude-opus-4.8"
+            parse_context_marker("claude-opus-4.8-thinking[256k]"),
+            ("claude-opus-4.8-thinking", Some(256_000))
         );
     }
 
     #[test]
-    fn strip_context_marker_leaves_markerless_id_unchanged() {
+    fn parse_context_marker_matches_known_markers_case_insensitively() {
         assert_eq!(
-            strip_context_marker("grok-composer-2.5-fast"),
-            "grok-composer-2.5-fast"
+            parse_context_marker("gpt-5.6-sol-thinking[1M]"),
+            ("gpt-5.6-sol-thinking", Some(1_000_000))
+        );
+        assert_eq!(
+            parse_context_marker("claude-opus-4.8-thinking[256K]"),
+            ("claude-opus-4.8-thinking", Some(256_000))
         );
     }
 
     #[test]
-    fn strip_context_marker_returns_empty_for_empty_input() {
-        assert_eq!(strip_context_marker(""), "");
+    fn parse_context_marker_strips_unknown_marker_without_window() {
+        assert_eq!(
+            parse_context_marker("claude-opus-4.8-thinking[2m]"),
+            ("claude-opus-4.8-thinking", None)
+        );
     }
 
     #[test]
-    fn strip_context_marker_leaves_non_trailing_bracket_unchanged() {
+    fn parse_context_marker_removes_marker_from_slashed_id() {
+        assert_eq!(
+            parse_context_marker("kr/claude-opus-4.8[1m]"),
+            ("kr/claude-opus-4.8", Some(1_000_000))
+        );
+    }
+
+    #[test]
+    fn parse_context_marker_leaves_markerless_id_unchanged() {
+        assert_eq!(
+            parse_context_marker("grok-composer-2.5-fast"),
+            ("grok-composer-2.5-fast", None)
+        );
+    }
+
+    #[test]
+    fn parse_context_marker_returns_empty_for_empty_input() {
+        assert_eq!(parse_context_marker(""), ("", None));
+    }
+
+    #[test]
+    fn parse_context_marker_leaves_non_trailing_bracket_unchanged() {
         // Not ending in `]`, so nothing is stripped.
-        assert_eq!(strip_context_marker("foo[1m]-bar"), "foo[1m]-bar");
+        assert_eq!(parse_context_marker("foo[1m]-bar"), ("foo[1m]-bar", None));
     }
 
     #[test]
-    fn build_codex_command_spec_strips_context_marker_from_model() {
+    fn build_codex_command_spec_maps_1m_marker_to_model_context_window() {
         let config = Config {
             active_profile: Some("profile-a".to_string()),
             profiles: BTreeMap::from([(
@@ -360,6 +402,40 @@ mod tests {
                 "model_provider=\"profile-a\"".to_string(),
                 "--model".to_string(),
                 "claude-opus-4-8".to_string(),
+                "-c".to_string(),
+                "model_context_window=1000000".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_codex_command_spec_maps_256k_marker_to_model_context_window() {
+        let config = Config {
+            active_profile: Some("profile-a".to_string()),
+            profiles: BTreeMap::from([(
+                "profile-a".to_string(),
+                Profile::builder()
+                    .endpoint("https://api.anthropic.com".to_string())
+                    .api_key("sk-ant-profile".to_string())
+                    .fable("claude-fable-5".to_string())
+                    .opus("claude-opus-4-8[256k]".to_string())
+                    .sonnet("claude-sonnet-4-6".to_string())
+                    .haiku("claude-haiku-4-5-20251001".to_string())
+                    .build(),
+            )]),
+            ..Config::default()
+        };
+
+        let spec = build_codex_command_spec(&config).expect("spec should build");
+        assert_eq!(
+            spec.args,
+            vec![
+                "-c".to_string(),
+                "model_provider=\"profile-a\"".to_string(),
+                "--model".to_string(),
+                "claude-opus-4-8".to_string(),
+                "-c".to_string(),
+                "model_context_window=256000".to_string(),
             ]
         );
     }
