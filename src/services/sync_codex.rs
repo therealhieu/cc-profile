@@ -89,8 +89,6 @@ pub(crate) fn merge_codex_config(existing: &str, config: &Config) -> Result<Merg
 ///
 /// An absent file is treated as an empty config (not an error). Returns the list of
 /// reserved provider ids that were skipped so the caller can warn about them.
-// Real caller arrives in Task 2.2 (`sync codex` subcommand dispatch).
-#[allow(dead_code)]
 pub fn sync(config: &Config, codex_path: &Path) -> Result<Vec<String>> {
     let existing = match std::fs::read_to_string(codex_path) {
         Ok(text) => text,
@@ -120,8 +118,30 @@ fn write_secure(path: &Path, contents: &str) -> Result<()> {
         })?;
         set_owner_only_directory_permissions(parent)?;
     }
-    std::fs::write(path, contents)
-        .with_context(|| format!("Could not write Codex config {}", path.display()))?;
+    // Create the file with `0o600` up front so the plaintext `Bearer <api_key>` is
+    // never written into a group/world-readable file, even transiently. The mode
+    // only applies to a newly created file, so the `set_owner_only_permissions`
+    // chmod below still runs to re-tighten a pre-existing loose file (e.g. `0o644`).
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("Could not write Codex config {}", path.display()))?;
+        file.write_all(contents.as_bytes())
+            .with_context(|| format!("Could not write Codex config {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)
+            .with_context(|| format!("Could not write Codex config {}", path.display()))?;
+    }
     set_owner_only_permissions(path)?;
     Ok(())
 }

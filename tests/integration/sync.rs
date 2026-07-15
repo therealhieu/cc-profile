@@ -70,7 +70,7 @@ fn sync_codex_writes_provider_block_for_profile() {
         .args(["sync", "codex"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Synced"))
+        .stdout(predicate::str::contains("Synced 2 provider"))
         .stdout(predicate::str::contains(
             codex_home.path().join("config.toml").display().to_string(),
         ));
@@ -80,6 +80,10 @@ fn sync_codex_writes_provider_block_for_profile() {
     assert!(
         written.contains("[model_providers.profile-a]"),
         "missing provider block:\n{written}"
+    );
+    assert!(
+        written.contains("[model_providers.profile-b]"),
+        "second profile not synced:\n{written}"
     );
     assert!(
         written.contains(r#"base_url = "https://api.anthropic.com""#),
@@ -104,6 +108,7 @@ fn sync_codex_skips_reserved_profile_and_still_succeeds() {
         .args(["sync", "codex"])
         .assert()
         .success()
+        .stdout(predicate::str::contains("Synced 1 provider"))
         .stderr(predicate::str::contains(r#"Skipped profile "openai""#));
 
     let written = std::fs::read_to_string(codex_home.path().join("config.toml"))
