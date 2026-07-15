@@ -13,18 +13,7 @@ pub fn run() -> Result<()> {
         let config = repository.load()?;
         clear_screen()?;
         println!("{}", render_main_screen(&config));
-        let mut options = vec![
-            "List profiles",
-            "New profile",
-            "Show config",
-            "Args",
-            "Envs",
-            "Sync codex",
-        ];
-        if active_profile_exists(&config) {
-            options.push("Start Claude");
-        }
-        options.push("Quit");
+        let options = main_menu_options(&config);
 
         let selected = Select::new()
             .with_prompt("Select an option")
@@ -39,6 +28,7 @@ pub fn run() -> Result<()> {
             "Envs" => envs_menu(&repository)?,
             "Sync codex" => sync_codex_flow(&repository)?,
             "Start Claude" => launch::start_claude(&config)?,
+            "Start Codex" => launch::start_codex(&config)?,
             "Quit" => break,
             _ => unreachable!("menu option should be handled"),
         }
@@ -99,6 +89,24 @@ fn active_profile_exists(config: &Config) -> bool {
         .active_profile
         .as_ref()
         .is_some_and(|name| config.profiles.contains_key(name))
+}
+
+/// Pure main-menu option list. Start entries appear only when an active profile exists.
+fn main_menu_options(config: &Config) -> Vec<&'static str> {
+    let mut options = vec![
+        "List profiles",
+        "New profile",
+        "Show config",
+        "Args",
+        "Envs",
+        "Sync codex",
+    ];
+    if active_profile_exists(config) {
+        options.push("Start Claude");
+        options.push("Start Codex");
+    }
+    options.push("Quit");
+    options
 }
 
 /// Builds (name, label) pairs for the profile menu. Binding the raw profile
@@ -563,5 +571,70 @@ mod tests {
 
         assert_eq!(profile.endpoint, "https://api.example.com");
         assert_eq!(profile.api_key, "sk-ant-secret");
+    }
+
+    #[test]
+    fn main_menu_options_include_start_entries_when_active_profile_exists() {
+        let options = main_menu_options(&config_with_active_profile());
+
+        assert_eq!(
+            options,
+            vec![
+                "List profiles",
+                "New profile",
+                "Show config",
+                "Args",
+                "Envs",
+                "Sync codex",
+                "Start Claude",
+                "Start Codex",
+                "Quit",
+            ]
+        );
+    }
+
+    #[test]
+    fn main_menu_options_omit_start_entries_without_active_profile() {
+        let options = main_menu_options(&Config::default());
+
+        assert_eq!(
+            options,
+            vec![
+                "List profiles",
+                "New profile",
+                "Show config",
+                "Args",
+                "Envs",
+                "Sync codex",
+                "Quit",
+            ]
+        );
+        assert!(!options.contains(&"Start Claude"));
+        assert!(!options.contains(&"Start Codex"));
+    }
+
+    #[test]
+    fn main_menu_options_omit_start_entries_when_active_profile_is_stale() {
+        let config = Config {
+            active_profile: Some("missing-profile".to_string()),
+            ..Default::default()
+        };
+
+        let options = main_menu_options(&config);
+
+        assert_eq!(
+            options,
+            vec![
+                "List profiles",
+                "New profile",
+                "Show config",
+                "Args",
+                "Envs",
+                "Sync codex",
+                "Quit",
+            ]
+        );
+        assert!(!options.contains(&"Start Claude"));
+        assert!(!options.contains(&"Start Codex"));
     }
 }
