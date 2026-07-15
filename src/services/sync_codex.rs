@@ -41,10 +41,12 @@ pub(crate) fn merge_codex_config(existing: &str, config: &Config) -> Result<Merg
         existing.parse().context("Invalid TOML in Codex config")?;
 
     // Guard: a pre-existing non-table `model_providers` must Err, not panic on index.
-    if let Some(item) = doc.get("model_providers")
-        && !item.is_table_like()
-    {
-        bail!("Codex config `model_providers` is not a table");
+    // Written as a nested `if let` (not a let-chain) to compile on the declared MSRV
+    // 1.85; let-chains only stabilized in Rust 1.88.
+    if let Some(item) = doc.get("model_providers") {
+        if !item.is_table_like() {
+            bail!("Codex config `model_providers` is not a table");
+        }
     }
 
     let mut skipped = Vec::new();
@@ -59,6 +61,12 @@ pub(crate) fn merge_codex_config(existing: &str, config: &Config) -> Result<Merg
         // pre-existing table and its hand-added keys intact.
         let providers = doc["model_providers"].or_insert(toml_edit::table());
         let table = providers[name.as_str()].or_insert(toml_edit::table());
+        // If the provider key already exists as a scalar (e.g. `profile-a = "x"`),
+        // `or_insert` is a no-op and `table` is not table-like; indexing it below would
+        // panic. Bail with a clear message instead.
+        if !table.is_table_like() {
+            bail!("Codex config `model_providers.{name}` is not a table");
+        }
         // Overwrite only these three managed keys; any hand-added sub-key is preserved.
         table["name"] = toml_edit::value(name.as_str());
         table["base_url"] = toml_edit::value(profile.endpoint.as_str());
@@ -129,6 +137,8 @@ mod tests {
             headers.get("Authorization").and_then(|v| v.as_str()),
             Some("Bearer sk-a")
         );
+        // Exactly the three managed keys — no leaked `wire_api`/`model`/etc.
+        assert_eq!(table.iter().count(), 3);
         assert!(outcome.skipped_reserved.is_empty());
     }
 
@@ -153,6 +163,33 @@ base_url = "https://other.example"
         assert!(rendered.contains("https://other.example"));
         // The new provider was added without disturbing the foreign one.
         assert!(rendered.contains("[model_providers.profile-a]"));
+    }
+
+    /// Byte-for-byte proof that merging preserves the entire preamble/foreign region
+    /// (comment, top-level key, blank line, foreign provider block) verbatim — the
+    /// reason `toml_edit` was chosen over `toml`. `.contains()` only proves substrings
+    /// appear; this asserts the exact original text survives as a prefix, so layout,
+    /// comments, key order, and whitespace before the insertion point are undisturbed.
+    #[test]
+    fn merge_preserves_existing_region_byte_for_byte() {
+        let existing = "# hand-written config\n\
+model = \"gpt-5\"\n\
+\n\
+[model_providers.other]\n\
+name = \"Other\"\n\
+base_url = \"https://other.example\"\n";
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        let rendered = merge_codex_config(existing, &config)
+            .expect("merge should succeed")
+            .rendered;
+
+        // The original text must be reproduced verbatim at the start of the output;
+        // the new provider block is appended after it.
+        assert!(
+            rendered.starts_with(existing),
+            "existing region not preserved byte-for-byte.\n--- expected prefix ---\n{existing}\n--- actual output ---\n{rendered}"
+        );
     }
 
     #[test]
@@ -243,6 +280,23 @@ Authorization = "Bearer stale"
 
         assert!(
             err.to_string().contains("model_providers"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn merge_rejects_scalar_provider_colliding_with_profile() {
+        // `model_providers` is a table, but the `profile-a` key inside it is a
+        // scalar string. `or_insert` is then a no-op, so writing managed keys must
+        // `bail!` rather than panic via `IndexMut`.
+        let existing = "[model_providers]\nprofile-a = \"x\"\n";
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        let err = merge_codex_config(existing, &config)
+            .expect_err("scalar provider collision should error, not panic");
+
+        assert!(
+            err.to_string().contains("model_providers.profile-a"),
             "unexpected error: {err}"
         );
     }
