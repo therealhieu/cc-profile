@@ -33,6 +33,9 @@ Deliver `cc-profile start [claude|codex]` that launches Claude Code unchanged, o
 - A narrower "sync only active profile" path — reuse full `sync_codex::sync`.
 - Changing `sync codex` semantics, reserved-id handling, or permission posture.
 - Passing the API key on argv (stays in the 0o600 Codex config via `http_headers`).
+- Applying `config.envs` / `config.args` to Codex launch (Claude-only). Codex auth stays in synced `http_headers`; argv is only `-c model_provider=…` and `--model`.
+- `show-command codex` (or dual-target show-command). `show-command` remains Claude-only (`start` / `start claude`).
+- Printing reserved-skip warnings on `start codex` (unlike `sync codex`); start only fails closed if the *active* profile is reserved.
 - Making bare `start` require an explicit target (defaults to Claude).
 - Cross-platform non-unix launch differences beyond existing `#[cfg(unix)]` exec path.
 
@@ -73,15 +76,17 @@ cli::start_codex_command(repository)
         ▼
 launch::start_codex(config)
         │
-        ├─ 1. resolve active profile (Err if missing)
-        ├─ 2. sync_codex::sync(config, codex_config_path())
-        │       (all profiles; reserved skipped; 0o600/0o700)
-        ├─ 3. build_codex_command_spec
+        ├─ 1. resolve_active_profile (Err if missing/stale)
+        ├─ 2. reject reserved active name (openai/ollama/lmstudio)
+        │       fail BEFORE sync/exec — no config write, no process
+        ├─ 3. sync_codex::sync(config, codex_path)
+        │       (all profiles; other reserved skipped; 0o600/0o700)
+        ├─ 4. build_codex_command_spec
         │       program = CC_PROFILE_CODEX_BIN | "codex"
         │       args    = ["-c", "model_provider=\"<active>\"",
         │                  "--model", "<opus>"]
         │       envs    = {}   (key lives in Codex config, not argv/env)
-        └─ 4. exec_command_spec (reuse existing launcher)
+        └─ 5. exec_command_spec (program-agnostic missing-binary message)
 
 interactive menu: "Start Claude" + "Start Codex" (both gated on active profile)
 ```
@@ -94,7 +99,7 @@ interactive menu: "Start Claude" + "Start Codex" (both gated on active profile)
 - **Test files:**
   - `src/services/launch.rs` (unit tests for codex spec + start_codex preconditions)
   - `src/cli.rs` (clap parse coverage if needed; prefer integration)
-  - `src/interactive.rs` (menu summary pure helpers if extracted)
+  - `src/interactive.rs` (`main_menu_options` pure helper unit tests)
   - `tests/integration/launch.rs` (extend: `start` still Claude; `start codex` argv + provider written)
   - `tests/integration/common.rs` (add `test_codex_shim()`)
   - `tests/fixtures/cc-profile-test-codex.rs` (argv-capturing shim)
@@ -104,10 +109,11 @@ interactive menu: "Start Claude" + "Start Codex" (both gated on active profile)
 - [ ] `cc-profile start` and `cc-profile start claude` still launch Claude with existing env/args behavior (no regression)
 - [ ] `cc-profile start codex` auto-syncs providers into Codex config, then execs `codex -c model_provider="<active>" --model "<opus>"`
 - [ ] Missing / stale active profile returns a clear error before any Codex process is started
-- [ ] Reserved active-profile name (e.g. `openai`) fails with a clear error after sync (provider was skipped; cannot launch)
+- [ ] Reserved active-profile name (e.g. `openai`) returns a clear error **before** sync and before any Codex process; launcher is never called; no config write for that failed start path
 - [ ] API key never appears on the Codex argv; only in the 0o600 config `http_headers`
-- [ ] Interactive menu offers "Start Codex" when an active profile exists
-- [ ] README documents `start [claude|codex]` and the opus → model mapping
+- [ ] Interactive menu offers "Start Codex" (and "Start Claude") when an active profile exists; neither Start entry when none
+- [ ] README documents `start [claude|codex]`, auto-sync, opus → model mapping; `show-command` clarified as Claude-only
+- [ ] Missing `codex` binary error message is program-agnostic (does not say "install Claude Code")
 - [ ] All tests pass
 - [ ] `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` pass
 - [ ] No placeholders remain
@@ -138,7 +144,7 @@ Cite, do not restate:
 
 **Subagent:** `implementer` (TDD) → `tester` (validate)
 
-**Scope:** Add a pure builder that resolves the active profile and returns a `CommandSpec` for Codex. Program comes from `CC_PROFILE_CODEX_BIN` (or an explicit override helper, mirroring Claude) defaulting to `"codex"`. Args are exactly `["-c", "model_provider=\"<name>\"", "--model", "<opus>"]` — the provider value is double-quoted so Codex's TOML parser treats it as a string even for names like `true` or `123`. Envs are empty. Does NOT write files, does NOT exec, does NOT call sync.
+**Scope:** Add a pure builder that resolves the active profile and returns a `CommandSpec` for Codex. Extract a private `resolve_active_profile(config) -> Result<(&str, &Profile)>` shared with the Claude builder path to avoid duplicated bail messages. Program comes from `CC_PROFILE_CODEX_BIN` (or an explicit override helper, mirroring Claude) defaulting to `"codex"`. Args are exactly `["-c", "model_provider=\"<name>\"", "--model", "<opus>"]` — the provider value is double-quoted so Codex's TOML parser treats it as a string even for names like `true` or `123` (quoting is for Codex TOML typing, not shell). Envs are empty (no `config.envs` / `config.args`). Does NOT write files, does NOT exec, does NOT call sync.
 
 **Files:**
 - Modify: `src/services/launch.rs`
@@ -147,12 +153,14 @@ Cite, do not restate:
 **Code Preview:**
 
 ```rust
-// crucial: quoted provider value + opus model; empty envs; program override
+// crucial: shared resolve; quoted provider + opus; empty envs
+fn resolve_active_profile(config: &Config) -> Result<(&str, &Profile)> { /* … */ }
+
 pub(crate) fn build_codex_command_spec_with_program(
     config: &Config,
     program_override: Option<String>,
 ) -> Result<CommandSpec> {
-    let (name, profile) = active_profile(config)?; // shared helper or inline
+    let (name, profile) = resolve_active_profile(config)?;
     Ok(CommandSpec {
         program: program_override.unwrap_or_else(|| "codex".into()),
         args: vec![
@@ -175,7 +183,7 @@ pub(crate) fn build_codex_command_spec_with_program(
    - Active name missing from `profiles` → error containing `"does not exist"`
    - Profile name needing quotes (e.g. `true`) still rendered as `model_provider="true"`
 2. Run tests — expect FAIL (functions missing)
-3. Implement minimum code: public `build_codex_command_spec` reading `CC_PROFILE_CODEX_BIN`, plus `build_codex_command_spec_with_program`; reuse active-profile resolution pattern from `build_command_spec_with_program` (extract a private helper only if it reduces duplication cleanly)
+3. Implement minimum code: private `resolve_active_profile`; public `build_codex_command_spec` reading `CC_PROFILE_CODEX_BIN`; `build_codex_command_spec_with_program`; refactor Claude builder to call `resolve_active_profile` only if it stays a tiny mechanical change
 4. Run tests — expect PASS
 5. Commit: `git commit -m "feat(launch): build Codex CommandSpec from active profile opus"`
 
@@ -189,53 +197,61 @@ pub(crate) fn build_codex_command_spec_with_program(
 
 **Subagent:** `implementer` (TDD) → `tester` (validate)
 
-**Scope:** Add `start_codex(config)` that (1) validates active profile exists, (2) rejects reserved active profile names with a clear error (cannot select a provider that sync skipped), (3) calls `sync_codex::sync(&config, &codex_config_path()?)`, (4) builds the Codex spec, (5) reuses the existing launcher/`exec_command_spec` path. Injectable launcher (mirror `start_claude_with_launcher`) so unit tests never real-exec. Does NOT change Claude start. Does NOT print CLI-facing messages (caller owns UX).
+**Scope:** Add `start_codex(config)` that resolves `codex_config_path()` and delegates to a path-injectable seam. The seam (1) resolves active profile via `resolve_active_profile`, (2) rejects reserved active names **before** any sync or launch (no config write, launcher never called), (3) calls `sync_codex::sync(config, codex_path)`, (4) builds the Codex spec, (5) invokes the injectable launcher. Generalize `exec_command_spec` / `run_command_spec` missing-binary text to be program-agnostic (must not say "install Claude Code" when program is `codex`). Does NOT change Claude start semantics. Does NOT print CLI-facing messages (caller owns UX). Does NOT mutate process env in unit tests.
 
 **Files:**
 - Modify: `src/services/launch.rs`
-- Test: unit tests in `src/services/launch.rs` `#[cfg(test)]` (tempdir + `CODEX_HOME` or explicit path injection)
+- Test: unit tests in `src/services/launch.rs` `#[cfg(test)]` (tempdir path injection — **never** set `CODEX_HOME` in launch unit tests)
 
 **Code Preview:**
 
 ```rust
-// crucial: sync-before-exec order; reserved active name fails closed
+// crucial: path injection for tests; reserved fails BEFORE sync
 pub fn start_codex(config: &Config) -> Result<()> {
-    start_codex_with_launcher(config, exec_command_spec)
+    let path = sync_codex::codex_config_path()?;
+    start_codex_with_path_and_launcher(config, &path, exec_command_spec)
 }
 
-fn start_codex_with_launcher<F>(config: &Config, launch: F) -> Result<()>
+pub(crate) fn start_codex_with_path_and_launcher<F>(
+    config: &Config,
+    codex_path: &Path,
+    launch: F,
+) -> Result<()>
 where
     F: FnOnce(&CommandSpec) -> Result<()>,
 {
     let (name, _) = resolve_active_profile(config)?;
-    if sync_codex::is_reserved_provider_id(&name) {
+    if sync_codex::is_reserved_provider_id(name) {
         bail!("Cannot start Codex: profile '{name}' is a reserved Codex provider id");
     }
-    let path = sync_codex::codex_config_path()?;
-    let _skipped = sync_codex::sync(config, &path)?;
-    let spec = build_codex_command_spec(config)?;
-    launch(&spec)
+    let _skipped = sync_codex::sync(config, codex_path)?;
+    launch(&build_codex_command_spec(config)?)
 }
 ```
 
-**Note:** `is_reserved_provider_id` is currently `pub(crate)` in `sync_codex.rs` — keep that visibility; `launch` is the same crate. If tests need a path override for sync, prefer injecting via `CODEX_HOME` behind the existing `ENV_LOCK` pattern in `sync_codex` tests, or add a `start_codex_with_paths_and_launcher` test-only seam — do **not** expand the public API without need.
+**Notes:**
+- `is_reserved_provider_id` stays `pub(crate)` in `sync_codex.rs`.
+- Do **not** reuse `sync_codex`'s private `ENV_LOCK` from `launch` tests — it is module-private and would not serialize cross-module env races.
+- Unit tests pass a temp `codex_path` into `start_codex_with_path_and_launcher`. Integration tests may set `CODEX_HOME` on the **child process** via `Command::env` (subprocess-safe).
 
 **Steps (run by implementer):**
 
 1. Write failing tests covering:
-   - Happy path with injectable launcher: sync writes provider block under temp `CODEX_HOME`, launcher receives expected `CommandSpec`
-   - Missing active profile fails before launch (launcher not called)
-   - Reserved active profile (`openai`) fails with clear message; launcher not called
-   - Sync error (e.g. invalid existing TOML under `CODEX_HOME`) propagates; launcher not called
+   - Happy path: temp `codex_path`, injectable launcher receives expected `CommandSpec`; provider block written to that path
+   - Missing active profile fails before launch; launcher not called; path unchanged/absent
+   - Reserved active profile (`openai`) fails **before** sync; launcher not called; codex path not written
+   - Sync error (invalid existing TOML at injected path) propagates; launcher not called
+   - `exec_command_spec` / missing-program message is program-agnostic for a non-claude program name
 2. Run tests — expect FAIL
-3. Implement minimum code; make `is_reserved_provider_id` reachable if needed (`pub(crate)` already is)
+3. Implement path-injectable seam + reserved-before-sync + program-agnostic exec/run error text
 4. Run tests — expect PASS
 5. Commit: `git commit -m "feat(launch): start Codex after syncing active profile provider"`
 
 **Validation (tester):**
 - Full test suite passes
-- Auto-sync side effect verified (provider block present on disk after start_codex unit test)
-- Reserved / missing active-profile paths never call launcher
+- Auto-sync side effect verified on injected path after happy-path unit test
+- Reserved / missing active-profile paths never call launcher and do not write codex config
+- Missing-binary message does not hardcode "Claude Code" for arbitrary program names
 - No regressions
 - Lint + typecheck pass
 
@@ -253,19 +269,19 @@ where
 
 **Subagent:** `implementer` (TDD) → `tester` (validate)
 
-**Scope:** Change `Command::Start` to carry an optional nested target, defaulting bare `start` to Claude. Dispatch `Claude` → existing `start_command` / `launch::start_claude`; `Codex` → new handler calling `launch::start_codex`. Preserve exit codes and error messages from the service layer. Add integration coverage with a Codex argv-capturing shim (mirror Claude). Does NOT change other subcommands.
+**Scope:** Change `Command::Start` to carry an optional nested target, defaulting bare `start` to Claude. **Unlike `Sync`/`SyncTarget` (required target), `Start` keeps `target: Option<StartTarget>` so bare `start` stays valid.** Dispatch `Claude` → existing `start_command` / `launch::start_claude`; `Codex` → new handler calling `launch::start_codex`. Preserve exit codes and error messages from the service layer. Add integration coverage with a Codex argv-capturing shim (mirror Claude). Does NOT change other subcommands.
 
 **Files:**
 - Modify: `src/cli.rs`
-- Create: `tests/fixtures/cc-profile-test-codex.rs`
-- Modify: `tests/integration/common.rs` (add `test_codex_shim()`)
-- Modify: `tests/integration/launch.rs` (Claude regression + new codex test)
+- Create: `tests/fixtures/cc-profile-test-codex.rs` (writes `args=[...]` to path from `CC_PROFILE_TEST_CODEX_OUTPUT`)
+- Modify: `tests/integration/common.rs` (add `test_codex_shim()` — `OnceLock` + ad-hoc `rustc`, same as Claude; no `Cargo.toml` fixture registration)
+- Modify: `tests/integration/launch.rs` (Claude regression + new codex tests)
 - Optionally extend: `tests/integration/cli.rs` help text assertions
 
 **Code Preview:**
 
 ```rust
-// crucial: optional nested target keeps bare `start` working
+// crucial: Option<StartTarget> keeps bare `start` working (unlike required Sync target)
 Start {
     #[command(subcommand)]
     target: Option<StartTarget>,
@@ -276,10 +292,6 @@ pub enum StartTarget {
     Claude,
     Codex,
 }
-
-// dispatch
-Some(Command::Start { target: None | Some(StartTarget::Claude) }) => start_command(&repository),
-Some(Command::Start { target: Some(StartTarget::Codex) }) => start_codex_command(&repository),
 ```
 
 **Steps (run by implementer):**
@@ -287,15 +299,16 @@ Some(Command::Start { target: Some(StartTarget::Codex) }) => start_codex_command
 1. Write failing tests covering:
    - Integration: existing `start` Claude shim test still passes
    - Integration: `start claude` same as bare `start` (Claude envs)
-   - Integration: `start codex` with `HOME` + `CODEX_HOME` + `CC_PROFILE_CODEX_BIN` shim:
+   - Integration: `start codex` with `HOME` + `CODEX_HOME` + `CC_PROFILE_CODEX_BIN` + `CC_PROFILE_TEST_CODEX_OUTPUT` shim:
      - exit 0
      - shim output contains `-c` and `model_provider="profile-a"` and `--model` + opus value
      - `$CODEX_HOME/config.toml` contains `[model_providers.profile-a]` and `Bearer …`
      - shim argv does **not** contain the api key
    - Integration: `start codex` with no active profile → failure, stderr contains `No active profile`
+   - Integration: active profile `openai` → `start codex` fails, stderr contains reserved message, shim output absent, codex config not written (fail-before-sync)
    - Help lists `claude` / `codex` under `start` (optional but preferred)
 2. Run tests — expect FAIL
-3. Implement clap enum + dispatch + `start_codex_command`; add codex shim fixture + `test_codex_shim()` (copy Claude fixture, capture `args` only — envs optional)
+3. Implement clap enum + dispatch + `start_codex_command`; add codex shim fixture + `test_codex_shim()`
 4. Run tests — expect PASS
 5. Commit: `git commit -m "feat(cli): add start claude|codex subcommand targets"`
 
@@ -303,6 +316,7 @@ Some(Command::Start { target: Some(StartTarget::Codex) }) => start_codex_command
 - Full suite passes including new integration tests
 - Bare `start` regression green
 - Codex path auto-sync + argv contract verified
+- Reserved-active integration case green (no write, no shim)
 - Lint + typecheck pass
 
 #### Task 2.2: Interactive "Start Codex" menu option [P with Task 2.1 after Task 1.2]
@@ -311,38 +325,41 @@ Some(Command::Start { target: Some(StartTarget::Codex) }) => start_codex_command
 
 **Subagent:** `implementer` (TDD) → `tester` (validate)
 
-**Scope:** When an active profile exists, offer `"Start Codex"` alongside `"Start Claude"`. Selecting it calls `launch::start_codex(&config)`. Keep `"Start Claude"` behavior unchanged. Extract a pure helper only if needed for testability (e.g. menu option list builder); do not over-abstract.
+**Scope:** Extract pure `main_menu_options(config) -> Vec<&'static str>` and unit-test it. When an active profile exists, the list includes both `"Start Claude"` and `"Start Codex"` (after existing options, before `"Quit"`). When no / stale active profile, neither Start entry appears. Selecting `"Start Codex"` calls `launch::start_codex(&config)`. Keep `"Start Claude"` behavior unchanged. No compile-only escape hatch.
 
 **Files:**
 - Modify: `src/interactive.rs`
-- Test: unit tests in `src/interactive.rs` if a pure menu-options helper is extracted; otherwise rely on compile + manual smoke note
+- Test: unit tests in `src/interactive.rs` for `main_menu_options`
 
 **Code Preview:**
 
 ```rust
-// crucial: gate both start options on active_profile_exists
-if active_profile_exists(&config) {
-    options.push("Start Claude");
-    options.push("Start Codex");
+// crucial: pure helper gates both Start entries
+fn main_menu_options(config: &Config) -> Vec<&'static str> {
+    let mut options = vec![/* List… Sync codex */];
+    if active_profile_exists(config) {
+        options.push("Start Claude");
+        options.push("Start Codex");
+    }
+    options.push("Quit");
+    options
 }
-// match arms:
-"Start Claude" => launch::start_claude(&config)?,
-"Start Codex" => launch::start_codex(&config)?,
 ```
 
 **Steps (run by implementer):**
 
 1. Write failing tests covering:
-   - If extracting `main_menu_options(config) -> Vec<&'static str>` (recommended for TDD): with active profile includes both Start entries; without active profile includes neither; always includes Quit
-   - If not extracting: document why and rely on match exhaustiveness + compile
-2. Run tests — expect FAIL (if helper extracted)
-3. Implement menu option + match arm
+   - With active profile: options include `Start Claude`, `Start Codex`, and `Quit`
+   - Without active profile / stale active: neither Start entry; still `Quit`
+   - Other fixed entries (e.g. `Sync codex`) still present
+2. Run tests — expect FAIL
+3. Implement `main_menu_options`, wire `run()` to use it, add `"Start Codex"` match arm → `launch::start_codex`
 4. Run tests — expect PASS
 5. Commit: `git commit -m "feat(interactive): add Start Codex menu option"`
 
 **Validation (tester):**
 - Full suite passes
-- Menu helper (if any) covers gated options
+- Menu helper covers gated options (active / none / stale)
 - No regressions to render_main_screen / other menu tests
 - Lint + typecheck pass
 
@@ -360,7 +377,7 @@ if active_profile_exists(&config) {
 
 **Subagent:** `implementer` (TDD) → `tester` (validate)
 
-**Scope:** Update Commands table and add a short note under Commands (or a brief subsection) covering: bare `start` = Claude; `start claude` / `start codex`; codex auto-syncs providers then launches with active profile as provider and `opus` as `--model`; API key stays in Codex config. Optionally update Quick Start menu sketch to show `Start Codex`. Do not rewrite the Sync section (still accurate); cross-link if useful.
+**Scope:** Update Commands table for bare `start`, `start claude`, and `start codex`. Add a short note covering auto-sync, active profile as `model_provider`, `opus` as `--model`, and API key staying in Codex config. Clarify that `show-command` remains Claude-only (`start` / `start claude`). Update the Quick Start menu sketch to include `Start Codex`. Do not rewrite the Sync section (still accurate); cross-link if useful.
 
 **Files:**
 - Modify: `README.md`
@@ -374,18 +391,21 @@ Commands table rows:
 | `cc-profile start` | Launch Claude Code with the active profile (alias of `start claude`) |
 | `cc-profile start claude` | Launch Claude Code with the active profile |
 | `cc-profile start codex` | Sync providers into Codex config, then launch Codex with the active profile as `model_provider` and its Opus model |
+| `cc-profile show-command` | Print the exact Claude shell command that `start` / `start claude` would run |
 
 **Steps (run by implementer):**
 
 1. Write/adjust any doc-adjacent checks if present (none expected); otherwise skip to edit
 2. N/A for pure docs RED phase — implementer verifies links/anchors still match ToC
-3. Edit README Commands table + short paragraph on codex start behavior
+3. Edit README Commands table + short paragraph on codex start behavior + Quick Start menu line + show-command Claude-only wording
 4. Sanity: `rg "start codex" README.md` finds the new docs; ToC unchanged unless new section added
 5. Commit: `git commit -m "docs: document start claude|codex targets"`
 
 **Validation (tester):**
 - README Commands table lists all three start forms
 - Auto-sync + opus mapping described accurately
+- `show-command` documented as Claude-only
+- Quick Start menu sketch includes Start Codex
 - Full test suite still passes (docs-only change)
 - Lint + typecheck pass
 
