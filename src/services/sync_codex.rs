@@ -2,7 +2,7 @@
 
 use crate::config::model::Config;
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Codex built-in provider ids that a synced profile must never overwrite.
 const RESERVED_PROVIDER_IDS: [&str; 3] = ["openai", "ollama", "lmstudio"];
@@ -34,8 +34,6 @@ pub(crate) struct MergeOutcome {
 /// Overwrites exactly three managed keys on each `[model_providers.<name>]` table
 /// (`name`, `base_url`, `http_headers`) and leaves every other table, key, and
 /// comment untouched. Reserved provider ids are skipped and reported to the caller.
-// Consumed by the sync entry point (Task 2.1); only tests reference it in this task.
-#[allow(dead_code)]
 pub(crate) fn merge_codex_config(existing: &str, config: &Config) -> Result<MergeOutcome> {
     let mut doc: toml_edit::DocumentMut =
         existing.parse().context("Invalid TOML in Codex config")?;
@@ -84,6 +82,78 @@ pub(crate) fn merge_codex_config(existing: &str, config: &Config) -> Result<Merg
         rendered: doc.to_string(),
         skipped_reserved: skipped,
     })
+}
+
+/// Read `codex_path`, merge in every cc-profile profile, and write the result back
+/// with owner-only permissions (parent dir `0o700`, file `0o600`).
+///
+/// An absent file is treated as an empty config (not an error). Returns the list of
+/// reserved provider ids that were skipped so the caller can warn about them.
+// Real caller arrives in Task 2.2 (`sync codex` subcommand dispatch).
+#[allow(dead_code)]
+pub fn sync(config: &Config, codex_path: &Path) -> Result<Vec<String>> {
+    let existing = match std::fs::read_to_string(codex_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(e)
+                .with_context(|| format!("Could not read Codex config {}", codex_path.display()));
+        }
+    };
+    let outcome = merge_codex_config(&existing, config)?;
+    write_secure(codex_path, &outcome.rendered)?;
+    Ok(outcome.skipped_reserved)
+}
+
+/// Write `contents` to `path`, creating the parent directory and tightening both the
+/// directory (`0o700`) and file (`0o600`) to owner-only permissions.
+///
+/// Mirrors the permission posture in `crate::config::repository` (`0o600` / `0o700`);
+/// on non-unix targets the permission tightening is a no-op, exactly as there.
+fn write_secure(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Could not create Codex config directory {}",
+                parent.display()
+            )
+        })?;
+        set_owner_only_directory_permissions(parent)?;
+    }
+    std::fs::write(path, contents)
+        .with_context(|| format!("Could not write Codex config {}", path.display()))?;
+    set_owner_only_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_owner_only_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(0o600);
+    std::fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_owner_only_directory_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_directory_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -299,6 +369,145 @@ Authorization = "Bearer stale"
             err.to_string().contains("model_providers.profile-a"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn sync_creates_file_with_merged_content_when_absent() {
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let codex_path = temp.path().join(".codex").join("config.toml");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        let skipped = sync(&config, &codex_path).expect("sync should succeed");
+
+        assert!(skipped.is_empty());
+        let written = std::fs::read_to_string(&codex_path).expect("file written");
+        assert!(written.contains("[model_providers.profile-a]"));
+        assert!(written.contains("https://a.example"));
+        assert!(written.contains("Bearer sk-a"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_creates_file_with_owner_only_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let codex_path = temp.path().join(".codex").join("config.toml");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        sync(&config, &codex_path).expect("sync should succeed");
+
+        let mode = std::fs::metadata(&codex_path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "file perms: {mode:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_creates_parent_dir_with_owner_only_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let dir = temp.path().join(".codex");
+        let codex_path = dir.join("config.toml");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        sync(&config, &codex_path).expect("sync should succeed");
+
+        let mode = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "dir perms: {mode:o}");
+    }
+
+    #[test]
+    fn sync_preserves_existing_file_content() {
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let codex_path = dir.join("config.toml");
+        let existing = "# hand-written\n\
+model = \"gpt-5\"\n\
+\n\
+[model_providers.other]\n\
+name = \"Other\"\n\
+base_url = \"https://other.example\"\n";
+        std::fs::write(&codex_path, existing).expect("write existing");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        sync(&config, &codex_path).expect("sync should succeed");
+
+        let written = std::fs::read_to_string(&codex_path).expect("read");
+        assert!(
+            written.starts_with(existing),
+            "existing content not preserved:\n{written}"
+        );
+        assert!(written.contains("[model_providers.profile-a]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_tightens_loose_existing_file_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let codex_path = dir.join("config.toml");
+        std::fs::write(&codex_path, "").expect("write existing");
+        std::fs::set_permissions(&codex_path, std::fs::Permissions::from_mode(0o644))
+            .expect("chmod loose");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        sync(&config, &codex_path).expect("sync should succeed");
+
+        let mode = std::fs::metadata(&codex_path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "file perms not tightened: {mode:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_tightens_loose_existing_dir_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let dir = temp.path().join(".codex");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod loose");
+        let codex_path = dir.join("config.toml");
+        let config = config_with(&[("profile-a", "https://a.example", "sk-a")]);
+
+        sync(&config, &codex_path).expect("sync should succeed");
+
+        let mode = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "dir perms not tightened: {mode:o}");
+    }
+
+    #[test]
+    fn sync_returns_skipped_reserved_ids() {
+        let temp = assert_fs::TempDir::new().expect("tempdir");
+        let codex_path = temp.path().join(".codex").join("config.toml");
+        let config = config_with(&[
+            ("openai", "https://reserved.example", "sk-reserved"),
+            ("profile-a", "https://a.example", "sk-a"),
+        ]);
+
+        let skipped = sync(&config, &codex_path).expect("sync should succeed");
+
+        assert_eq!(skipped, vec!["openai".to_string()]);
+        let written = std::fs::read_to_string(&codex_path).expect("read");
+        assert!(!written.contains("reserved.example"));
+        assert!(written.contains("[model_providers.profile-a]"));
     }
 
     /// Serializes tests that read or mutate the process-global `CODEX_HOME` env var.
