@@ -68,6 +68,7 @@ Custom envs
   Args
   Envs
   Start Claude
+  Start Codex
   Quit
 ```
 
@@ -139,16 +140,20 @@ haiku = "claude-haiku-4.5"
 | Command | Description |
 | --- | --- |
 | `cc-profile` | Interactive menu (no subcommand) |
-| `cc-profile start` | Launch Claude Code with the active profile |
+| `cc-profile start` | Launch Claude Code with the active profile (alias of `start claude`) |
+| `cc-profile start claude` | Launch Claude Code with the active profile |
+| `cc-profile start codex` | Sync providers into Codex config, then launch Codex with the active profile as `model_provider` and its Opus model |
 | `cc-profile list` | List profiles, marking the active one |
 | `cc-profile use <name>` | Set the active profile |
 | `cc-profile show` | Print the current config and its file path |
-| `cc-profile show-command` | Print the exact shell command (`ANTHROPIC_* … claude`) that `start` would run for the active profile |
+| `cc-profile show-command` | Print the exact Claude shell command that `start` / `start claude` would run |
 | `cc-profile new --name … --endpoint … --api-key … --fable … --opus … --sonnet … --haiku … [--active]` | Create a profile |
 | `cc-profile edit <name> [--endpoint …] [--api-key …] [--fable …] [--opus …] [--sonnet …] [--haiku …] [--rename …]` | Update fields on a profile |
 | `cc-profile delete <name>` | Delete a profile |
 | `cc-profile sync codex` | Write every profile into `~/.codex/config.toml` as a Codex custom provider (preserves other Codex config) |
 | `cc-profile update` | Update cc-profile itself (see below) |
+
+`start` / `start claude` launch Claude Code with the active profile’s env vars and args. `start codex` first auto-syncs all profiles into the Codex config ([Sync](#sync)), then runs `codex -c model_provider="<active>" --model "<opus>"`. The API key stays in the `0o600` Codex config `http_headers` only — never on argv. `show-command` remains Claude-only.
 
 ## Sync
 
