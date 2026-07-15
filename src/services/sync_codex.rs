@@ -21,9 +21,7 @@ pub fn codex_config_path() -> Result<PathBuf> {
 }
 
 /// Result of merging cc-profile profiles into Codex TOML text.
-// Consumed by the sync entry point (Task 2.1); only tests reference it in this task.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct MergeOutcome {
     pub rendered: String,
     pub skipped_reserved: Vec<String>,
