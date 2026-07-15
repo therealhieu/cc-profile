@@ -10,6 +10,7 @@ A **profile** bundles an endpoint, API key, and the four model IDs (Fable, Opus,
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Commands](#commands)
+- [Sync](#sync)
 - [Updating](#updating)
 - [Uninstall](#uninstall)
 - [Contributing](#contributing)
@@ -146,7 +147,30 @@ haiku = "claude-haiku-4.5"
 | `cc-profile new --name … --endpoint … --api-key … --fable … --opus … --sonnet … --haiku … [--active]` | Create a profile |
 | `cc-profile edit <name> [--endpoint …] [--api-key …] [--fable …] [--opus …] [--sonnet …] [--haiku …] [--rename …]` | Update fields on a profile |
 | `cc-profile delete <name>` | Delete a profile |
+| `cc-profile sync codex` | Write every profile into `~/.codex/config.toml` as a Codex custom provider (preserves other Codex config) |
 | `cc-profile update` | Update cc-profile itself (see below) |
+
+## Sync
+
+```bash
+cc-profile sync codex
+```
+
+`sync codex` writes every cc-profile profile into your user-level Codex config as a custom provider. It targets `~/.codex/config.toml`, or `$CODEX_HOME/config.toml` when `CODEX_HOME` is set. The file is written with `0600` permissions and its parent directory with `0700`.
+
+Each profile becomes a `[model_providers.<name>]` table with exactly three keys:
+
+| Profile field | Codex provider key |
+| --- | --- |
+| profile name | provider id + `name` |
+| `endpoint` | `base_url` |
+| `api_key` | `http_headers = { Authorization = "Bearer <api_key>" }` |
+
+No model is synced — Codex custom providers carry no model, so the four model IDs are left out, along with `wire_api` and any other keys (Codex defaults apply).
+
+The merge is format-preserving: only the `[model_providers.<name>]` tables that match a cc-profile profile are overwritten. Everything else in the Codex config is preserved byte-for-byte — other providers, the top-level `model`, `approval_policy`, `[mcp_servers.*]`, and comments. Providers that don't correspond to a cc-profile profile are never deleted.
+
+The reserved Codex provider ids `openai`, `ollama`, and `lmstudio` cannot be custom providers. A profile with one of those names is skipped with a warning; the remaining profiles still sync and the command exits `0`.
 
 ## Updating
 
