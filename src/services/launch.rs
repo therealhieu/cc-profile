@@ -1,10 +1,12 @@
 //! Builds and runs the `claude` process from persisted [`Config`] state.
 
 use crate::config::{Config, Profile};
+use crate::services::sync_codex;
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::Command;
 
 /// Resolved program, arguments, and environment for launching Claude Code.
@@ -149,18 +151,19 @@ pub fn run_command_spec(spec: &CommandSpec) -> Result<()> {
         .args(&spec.args)
         .envs(&spec.envs)
         .status()
-        .with_context(|| {
-            format!(
-                "Could not find `{}` on PATH. Please install Claude Code or ensure the `{}` command is available.",
-                spec.program, spec.program
-            )
-        })?;
+        .with_context(|| missing_program_message(&spec.program))?;
 
     if !status.success() {
         bail!("{} exited with status: {}", spec.program, status);
     }
 
     Ok(())
+}
+
+fn missing_program_message(program: &str) -> String {
+    format!(
+        "Could not find `{program}` on PATH. Please install it or ensure the `{program}` command is available."
+    )
 }
 
 /// Builds a command spec from `config` and replaces this process with Claude Code.
@@ -181,6 +184,38 @@ where
     launch(&spec)
 }
 
+/// Syncs the active profile into Codex config, then replaces this process with Codex.
+///
+/// # Errors
+///
+/// Returns an error when no active profile is set, the active profile is a reserved Codex
+/// provider id, sync fails, building the command fails, or launching Codex fails before the
+/// process image is replaced.
+pub fn start_codex(config: &Config) -> Result<()> {
+    let path = sync_codex::codex_config_path()?;
+    start_codex_with_path_and_launcher(config, &path, exec_command_spec)
+}
+
+/// Path- and launcher-injectable seam for [`start_codex`].
+///
+/// Resolves the active profile, rejects reserved provider ids before any sync or launch, syncs
+/// profiles into `codex_path`, builds the Codex command, then invokes `launch`.
+pub(crate) fn start_codex_with_path_and_launcher<F>(
+    config: &Config,
+    codex_path: &Path,
+    launch: F,
+) -> Result<()>
+where
+    F: FnOnce(&CommandSpec) -> Result<()>,
+{
+    let (name, _) = resolve_active_profile(config)?;
+    if sync_codex::is_reserved_provider_id(name) {
+        bail!("Cannot start Codex: profile '{name}' is a reserved Codex provider id");
+    }
+    let _skipped = sync_codex::sync(config, codex_path)?;
+    launch(&build_codex_command_spec(config)?)
+}
+
 #[cfg(unix)]
 fn exec_command_spec(spec: &CommandSpec) -> Result<()> {
     let error = Command::new(&spec.program)
@@ -188,12 +223,7 @@ fn exec_command_spec(spec: &CommandSpec) -> Result<()> {
         .envs(&spec.envs)
         .exec();
 
-    Err(error).with_context(|| {
-        format!(
-            "Could not find `{}` on PATH. Please install Claude Code or ensure the `{}` command is available.",
-            spec.program, spec.program
-        )
-    })
+    Err(error).with_context(|| missing_program_message(&spec.program))
 }
 
 #[cfg(test)]
@@ -420,8 +450,26 @@ mod tests {
         let error = exec_command_spec(&spec).expect_err("exec should fail for missing program");
 
         assert!(error.to_string().contains(
-            "Could not find `cc-profile-definitely-missing-claude-bin` on PATH. Please install Claude Code or ensure the `cc-profile-definitely-missing-claude-bin` command is available."
+            "Could not find `cc-profile-definitely-missing-claude-bin` on PATH. Please install it or ensure the `cc-profile-definitely-missing-claude-bin` command is available."
         ));
+        assert!(!error.to_string().contains("Claude Code"));
+    }
+
+    #[test]
+    fn exec_command_spec_missing_program_message_is_program_agnostic_for_codex() {
+        let spec = CommandSpec {
+            program: "cc-profile-definitely-missing-codex-bin".to_string(),
+            args: Vec::new(),
+            envs: BTreeMap::new(),
+        };
+
+        let error = exec_command_spec(&spec).expect_err("exec should fail for missing program");
+        let message = error.to_string();
+
+        assert!(message.contains(
+            "Could not find `cc-profile-definitely-missing-codex-bin` on PATH. Please install it or ensure the `cc-profile-definitely-missing-codex-bin` command is available."
+        ));
+        assert!(!message.contains("Claude Code"));
     }
 
     #[test]
@@ -429,6 +477,130 @@ mod tests {
         let error = start_claude(&Config::default())
             .expect_err("start should fail before launching claude");
         assert!(error.to_string().contains("No active profile is set"));
+    }
+
+    #[test]
+    fn start_codex_happy_path_syncs_provider_and_launches_spec() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex_path = dir.path().join("config.toml");
+        let expected_spec =
+            build_codex_command_spec(&active_config(false)).expect("spec should build");
+        let captured = std::cell::RefCell::new(None);
+
+        start_codex_with_path_and_launcher(&active_config(false), &codex_path, |spec| {
+            *captured.borrow_mut() = Some(spec.clone());
+            Ok(())
+        })
+        .expect("start_codex should succeed");
+
+        let launched = captured.into_inner().expect("launcher should receive a spec");
+        assert_eq!(launched, expected_spec);
+        assert!(
+            launched
+                .args
+                .iter()
+                .all(|arg| !arg.contains("sk-ant-profile")),
+            "api key must not appear on argv: {:?}",
+            launched.args
+        );
+
+        let written = std::fs::read_to_string(&codex_path).expect("codex config written");
+        assert!(
+            written.contains("[model_providers.profile-a]"),
+            "expected provider block, got:\n{written}"
+        );
+        assert!(
+            written.contains("Bearer sk-ant-profile"),
+            "expected Bearer token, got:\n{written}"
+        );
+    }
+
+    #[test]
+    fn start_codex_missing_active_profile_fails_before_launch_and_write() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex_path = dir.path().join("config.toml");
+        let launched = std::cell::Cell::new(false);
+
+        let error =
+            start_codex_with_path_and_launcher(&Config::default(), &codex_path, |_spec| {
+                launched.set(true);
+                Ok(())
+            })
+            .expect_err("missing active profile should fail");
+
+        assert!(error.to_string().contains("No active profile is set"));
+        assert!(!launched.get(), "launcher must not be called");
+        assert!(
+            !codex_path.exists(),
+            "codex path must remain absent when active profile is missing"
+        );
+    }
+
+    #[test]
+    fn start_codex_reserved_active_profile_fails_before_sync_and_launch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex_path = dir.path().join("config.toml");
+        let launched = std::cell::Cell::new(false);
+        let config = Config {
+            active_profile: Some("openai".to_string()),
+            profiles: BTreeMap::from([(
+                "openai".to_string(),
+                Profile::builder()
+                    .endpoint("https://api.openai.com".to_string())
+                    .api_key("sk-openai".to_string())
+                    .fable("fable".to_string())
+                    .opus("opus".to_string())
+                    .sonnet("sonnet".to_string())
+                    .haiku("haiku".to_string())
+                    .build(),
+            )]),
+            ..Config::default()
+        };
+
+        let error = start_codex_with_path_and_launcher(&config, &codex_path, |_spec| {
+            launched.set(true);
+            Ok(())
+        })
+        .expect_err("reserved active profile should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Cannot start Codex: profile 'openai' is a reserved Codex provider id")
+        );
+        assert!(!launched.get(), "launcher must not be called");
+        assert!(
+            !codex_path.exists(),
+            "reserved active profile must not write codex config"
+        );
+    }
+
+    #[test]
+    fn start_codex_sync_error_propagates_and_skips_launch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex_path = dir.path().join("config.toml");
+        std::fs::write(&codex_path, "model_providers = \"not-a-table\"\n")
+            .expect("seed invalid toml");
+        let before = std::fs::read_to_string(&codex_path).expect("read seeded file");
+        let launched = std::cell::Cell::new(false);
+
+        let error =
+            start_codex_with_path_and_launcher(&active_config(false), &codex_path, |_spec| {
+                launched.set(true);
+                Ok(())
+            })
+            .expect_err("invalid existing toml should fail sync");
+
+        assert!(
+            error.to_string().contains("model_providers")
+                || error
+                    .chain()
+                    .any(|cause| cause.to_string().contains("model_providers")),
+            "expected model_providers sync error, got: {error:#}"
+        );
+        assert!(!launched.get(), "launcher must not be called after sync error");
+        let after = std::fs::read_to_string(&codex_path).expect("read after failed sync");
+        assert_eq!(before, after, "failed sync must not rewrite invalid config");
     }
 
     #[test]
