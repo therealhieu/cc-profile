@@ -11,6 +11,7 @@ pub mod profiles;
 pub mod receipt;
 pub mod release;
 pub mod self_replace;
+pub mod sync_codex;
 pub mod update;
 pub mod update_check_cache;
 #[cfg(test)]
