@@ -493,7 +493,9 @@ mod tests {
         })
         .expect("start_codex should succeed");
 
-        let launched = captured.into_inner().expect("launcher should receive a spec");
+        let launched = captured
+            .into_inner()
+            .expect("launcher should receive a spec");
         assert_eq!(launched, expected_spec);
         assert!(
             launched
@@ -521,12 +523,11 @@ mod tests {
         let codex_path = dir.path().join("config.toml");
         let launched = std::cell::Cell::new(false);
 
-        let error =
-            start_codex_with_path_and_launcher(&Config::default(), &codex_path, |_spec| {
-                launched.set(true);
-                Ok(())
-            })
-            .expect_err("missing active profile should fail");
+        let error = start_codex_with_path_and_launcher(&Config::default(), &codex_path, |_spec| {
+            launched.set(true);
+            Ok(())
+        })
+        .expect_err("missing active profile should fail");
 
         assert!(error.to_string().contains("No active profile is set"));
         assert!(!launched.get(), "launcher must not be called");
@@ -598,7 +599,10 @@ mod tests {
                     .any(|cause| cause.to_string().contains("model_providers")),
             "expected model_providers sync error, got: {error:#}"
         );
-        assert!(!launched.get(), "launcher must not be called after sync error");
+        assert!(
+            !launched.get(),
+            "launcher must not be called after sync error"
+        );
         let after = std::fs::read_to_string(&codex_path).expect("read after failed sync");
         assert_eq!(before, after, "failed sync must not rewrite invalid config");
     }
