@@ -1,6 +1,6 @@
 //! Builds and runs the `claude` process from persisted [`Config`] state.
 
-use crate::config::Config;
+use crate::config::{Config, Profile};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 #[cfg(unix)]
@@ -34,12 +34,7 @@ pub(crate) fn build_command_spec_with_program(
     config: &Config,
     program_override: Option<String>,
 ) -> Result<CommandSpec> {
-    let Some(active_name) = config.active_profile.as_ref() else {
-        bail!("No active profile is set");
-    };
-    let Some(profile) = config.profiles.get(active_name) else {
-        bail!("Active profile '{active_name}' does not exist");
-    };
+    let (_active_name, profile) = resolve_active_profile(config)?;
 
     let mut envs = config.envs.clone();
     envs.insert("ANTHROPIC_BASE_URL".to_string(), profile.endpoint.clone());
@@ -67,6 +62,49 @@ pub(crate) fn build_command_spec_with_program(
         args,
         envs,
     })
+}
+
+/// Builds a [`CommandSpec`] for Codex from the active profile's name and opus model.
+///
+/// Program comes from `CC_PROFILE_CODEX_BIN` when set, otherwise `"codex"`. Args are exactly
+/// `["-c", "model_provider=\"<name>\"", "--model", "<opus>"]` with an empty env map.
+///
+/// # Errors
+///
+/// Returns an error when no active profile is set or the active profile name is missing from
+/// [`Config::profiles`].
+pub fn build_codex_command_spec(config: &Config) -> Result<CommandSpec> {
+    let program_override = std::env::var("CC_PROFILE_CODEX_BIN").ok();
+    build_codex_command_spec_with_program(config, program_override)
+}
+
+/// Like [`build_codex_command_spec`], but uses `program_override` when set instead of reading
+/// `CC_PROFILE_CODEX_BIN` from the environment.
+pub(crate) fn build_codex_command_spec_with_program(
+    config: &Config,
+    program_override: Option<String>,
+) -> Result<CommandSpec> {
+    let (name, profile) = resolve_active_profile(config)?;
+    Ok(CommandSpec {
+        program: program_override.unwrap_or_else(|| "codex".into()),
+        args: vec![
+            "-c".into(),
+            format!("model_provider=\"{name}\""),
+            "--model".into(),
+            profile.opus.clone(),
+        ],
+        envs: BTreeMap::new(),
+    })
+}
+
+fn resolve_active_profile(config: &Config) -> Result<(&str, &Profile)> {
+    let Some(active_name) = config.active_profile.as_ref() else {
+        bail!("No active profile is set");
+    };
+    let Some(profile) = config.profiles.get(active_name) else {
+        bail!("Active profile '{active_name}' does not exist");
+    };
+    Ok((active_name.as_str(), profile))
 }
 
 /// POSIX shell quoting: returns `value` unquoted when it consists only of characters
@@ -202,6 +240,81 @@ mod tests {
         )
         .expect("spec should build");
         assert_eq!(spec.program, "/tmp/custom-claude");
+    }
+
+    #[test]
+    fn build_codex_command_spec_uses_active_profile_provider_and_opus() {
+        let spec = build_codex_command_spec(&active_config(false)).expect("spec should build");
+
+        assert_eq!(spec.program, "codex");
+        assert_eq!(
+            spec.args,
+            vec![
+                "-c".to_string(),
+                "model_provider=\"profile-a\"".to_string(),
+                "--model".to_string(),
+                "claude-opus-4-8".to_string(),
+            ]
+        );
+        assert!(spec.envs.is_empty());
+    }
+
+    #[test]
+    fn build_codex_command_spec_uses_program_override_when_set() {
+        let spec = build_codex_command_spec_with_program(
+            &active_config(false),
+            Some("/tmp/custom-codex".to_string()),
+        )
+        .expect("spec should build");
+        assert_eq!(spec.program, "/tmp/custom-codex");
+    }
+
+    #[test]
+    fn build_codex_command_spec_errors_when_active_profile_is_missing() {
+        let error = build_codex_command_spec(&Config::default())
+            .expect_err("missing active profile should fail");
+        assert!(error.to_string().contains("No active profile is set"));
+    }
+
+    #[test]
+    fn build_codex_command_spec_errors_when_active_profile_references_missing_profile() {
+        let config = Config {
+            active_profile: Some("missing-profile".to_string()),
+            ..Config::default()
+        };
+        let error =
+            build_codex_command_spec(&config).expect_err("missing profile entry should fail");
+        assert!(error.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn build_codex_command_spec_quotes_provider_name_for_toml_typing() {
+        let config = Config {
+            active_profile: Some("true".to_string()),
+            profiles: BTreeMap::from([(
+                "true".to_string(),
+                Profile::builder()
+                    .endpoint("https://api.anthropic.com".to_string())
+                    .api_key("sk-ant-profile".to_string())
+                    .fable("claude-fable-5".to_string())
+                    .opus("claude-opus-4-8".to_string())
+                    .sonnet("claude-sonnet-4-6".to_string())
+                    .haiku("claude-haiku-4-5-20251001".to_string())
+                    .build(),
+            )]),
+            ..Config::default()
+        };
+
+        let spec = build_codex_command_spec(&config).expect("spec should build");
+        assert_eq!(
+            spec.args,
+            vec![
+                "-c".to_string(),
+                "model_provider=\"true\"".to_string(),
+                "--model".to_string(),
+                "claude-opus-4-8".to_string(),
+            ]
+        );
     }
 
     #[test]
