@@ -93,10 +93,20 @@ pub(crate) fn build_codex_command_spec_with_program(
             "-c".into(),
             format!("model_provider=\"{name}\""),
             "--model".into(),
-            profile.opus.clone(),
+            strip_context_marker(&profile.opus).to_string(),
         ],
         envs: BTreeMap::new(),
     })
+}
+
+/// Codex doesn't understand the proxy's `[1m]`-style context markers, so strip a
+/// single trailing bracketed group (`[...]`) from the model id; ids without one are
+/// returned unchanged. Plain `match` (no let-chain) to respect the repo MSRV 1.85.
+fn strip_context_marker(model: &str) -> &str {
+    match model.rfind('[') {
+        Some(i) if model.ends_with(']') => &model[..i],
+        _ => model,
+    }
 }
 
 fn resolve_active_profile(config: &Config) -> Result<(&str, &Profile)> {
@@ -287,6 +297,71 @@ mod tests {
             ]
         );
         assert!(spec.envs.is_empty());
+    }
+
+    #[test]
+    fn strip_context_marker_removes_trailing_bracket_group() {
+        assert_eq!(
+            strip_context_marker("claude-opus-4.8-thinking[1m]"),
+            "claude-opus-4.8-thinking"
+        );
+    }
+
+    #[test]
+    fn strip_context_marker_removes_marker_from_slashed_id() {
+        assert_eq!(
+            strip_context_marker("kr/claude-opus-4.8[1m]"),
+            "kr/claude-opus-4.8"
+        );
+    }
+
+    #[test]
+    fn strip_context_marker_leaves_markerless_id_unchanged() {
+        assert_eq!(
+            strip_context_marker("grok-composer-2.5-fast"),
+            "grok-composer-2.5-fast"
+        );
+    }
+
+    #[test]
+    fn strip_context_marker_returns_empty_for_empty_input() {
+        assert_eq!(strip_context_marker(""), "");
+    }
+
+    #[test]
+    fn strip_context_marker_leaves_non_trailing_bracket_unchanged() {
+        // Not ending in `]`, so nothing is stripped.
+        assert_eq!(strip_context_marker("foo[1m]-bar"), "foo[1m]-bar");
+    }
+
+    #[test]
+    fn build_codex_command_spec_strips_context_marker_from_model() {
+        let config = Config {
+            active_profile: Some("profile-a".to_string()),
+            profiles: BTreeMap::from([(
+                "profile-a".to_string(),
+                Profile::builder()
+                    .endpoint("https://api.anthropic.com".to_string())
+                    .api_key("sk-ant-profile".to_string())
+                    .fable("claude-fable-5".to_string())
+                    .opus("claude-opus-4-8[1m]".to_string())
+                    .sonnet("claude-sonnet-4-6".to_string())
+                    .haiku("claude-haiku-4-5-20251001".to_string())
+                    .build(),
+            )]),
+            ..Config::default()
+        };
+
+        let spec = build_codex_command_spec(&config).expect("spec should build");
+        assert_eq!(
+            spec.args,
+            vec![
+                "-c".to_string(),
+                "model_provider=\"profile-a\"".to_string(),
+                "--model".to_string(),
+                "claude-opus-4-8".to_string(),
+            ]
+        );
     }
 
     #[test]
