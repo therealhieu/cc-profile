@@ -22,7 +22,11 @@ pub struct Cli {
 /// Supported subcommands for profile management.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Start,
+    Start {
+        /// Optional launch target; bare `start` defaults to Claude.
+        #[command(subcommand)]
+        target: Option<StartTarget>,
+    },
     List,
     Use {
         profile: Option<String>,
@@ -79,6 +83,15 @@ pub enum Command {
     },
 }
 
+/// Nested launch targets for `cc-profile start`.
+///
+/// Optional on `Command::Start` so bare `start` remains valid and defaults to Claude.
+#[derive(Debug, Subcommand)]
+pub enum StartTarget {
+    Claude,
+    Codex,
+}
+
 /// Targets that `cc-profile sync` can write to; a nested subcommand so new
 /// targets can be added without changing the top-level command surface.
 #[derive(Debug, Subcommand)]
@@ -102,7 +115,10 @@ pub fn run() -> Result<()> {
         },
         Some(Command::Show) => show_config(&repository),
         Some(Command::ShowCommand) => show_command(&repository),
-        Some(Command::Start) => start_command(&repository),
+        Some(Command::Start { target }) => match target {
+            None | Some(StartTarget::Claude) => start_command(&repository),
+            Some(StartTarget::Codex) => start_codex_command(&repository),
+        },
         Some(Command::New {
             name,
             endpoint,
@@ -360,6 +376,11 @@ fn delete_profile_command(repository: &ConfigRepository, name: &str) -> Result<(
 fn start_command(repository: &ConfigRepository) -> Result<()> {
     let config = repository.load()?;
     launch::start_claude(&config)
+}
+
+fn start_codex_command(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    launch::start_codex(&config)
 }
 
 fn show_command(repository: &ConfigRepository) -> Result<()> {
