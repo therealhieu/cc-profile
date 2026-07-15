@@ -2,7 +2,7 @@
 
 use crate::config::{Config, ConfigRepository, Profile};
 use crate::interactive;
-use crate::services::{launch, profiles, update};
+use crate::services::{launch, profiles, sync_codex, update};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::io::IsTerminal;
@@ -73,6 +73,17 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    Sync {
+        #[command(subcommand)]
+        target: SyncTarget,
+    },
+}
+
+/// Targets that `cc-profile sync` can write to; a nested subcommand so new
+/// targets can be added without changing the top-level command surface.
+#[derive(Debug, Subcommand)]
+pub enum SyncTarget {
+    Codex,
 }
 
 /// Parses process arguments and runs the matching handler or interactive mode.
@@ -137,6 +148,9 @@ pub fn run() -> Result<()> {
             },
         ),
         Some(Command::Delete { profile }) => delete_profile_command(&repository, &profile),
+        Some(Command::Sync {
+            target: SyncTarget::Codex,
+        }) => sync_codex_command(&repository),
         Some(Command::Update { .. }) => unreachable!("update dispatched above"),
     }
 }
@@ -352,6 +366,21 @@ fn show_command(repository: &ConfigRepository) -> Result<()> {
     let config = repository.load()?;
     let spec = launch::build_command_spec(&config)?;
     println!("{}", launch::render_command_line(&spec));
+    Ok(())
+}
+
+fn sync_codex_command(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    let path = sync_codex::codex_config_path()?;
+    let skipped = sync_codex::sync(&config, &path)?;
+    for name in &skipped {
+        eprintln!("Skipped profile \"{name}\": reserved Codex provider id");
+    }
+    println!(
+        "Synced {} provider(s) to {}",
+        config.profiles.len() - skipped.len(),
+        path.display()
+    );
     Ok(())
 }
 

@@ -1,6 +1,7 @@
 mod cli;
 mod common;
 mod launch;
+mod sync;
 mod update;
 
 #[test]
