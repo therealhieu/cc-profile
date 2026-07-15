@@ -1,8 +1,9 @@
 use crate::config::{Config, ConfigRepository, Profile};
-use crate::services::{claude_args, env_vars, launch, profiles, update};
+use crate::services::{claude_args, env_vars, launch, profiles, sync_codex, update};
 use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
 use std::io::{self, IsTerminal, Write};
+use std::path::Path;
 
 /// Runs the prompt-based interactive menu.
 pub fn run() -> Result<()> {
@@ -18,6 +19,7 @@ pub fn run() -> Result<()> {
             "Show config",
             "Args",
             "Envs",
+            "Sync codex",
         ];
         if active_profile_exists(&config) {
             options.push("Start Claude");
@@ -35,6 +37,7 @@ pub fn run() -> Result<()> {
             "Show config" => show_config_flow(&repository)?,
             "Args" => args_menu(&repository)?,
             "Envs" => envs_menu(&repository)?,
+            "Sync codex" => sync_codex_flow(&repository)?,
             "Start Claude" => launch::start_claude(&config)?,
             "Quit" => break,
             _ => unreachable!("menu option should be handled"),
@@ -399,6 +402,27 @@ fn env_options(config: &Config) -> Vec<String> {
     options
 }
 
+fn sync_codex_flow(repository: &ConfigRepository) -> Result<()> {
+    let config = repository.load()?;
+    let path = sync_codex::codex_config_path()?;
+    let skipped = sync_codex::sync(&config, &path)?;
+    let synced = config.profiles.len() - skipped.len();
+    println!("{}", sync_codex_summary(synced, &path, &skipped));
+    Ok(())
+}
+
+/// Builds the user-facing feedback for a codex sync: one warning line per
+/// skipped reserved provider, followed by the synced-count summary. Kept pure
+/// (no I/O) so the formatting is unit-testable; `sync_codex_flow` prints it.
+fn sync_codex_summary(synced: usize, path: &Path, skipped: &[String]) -> String {
+    let mut lines: Vec<String> = skipped
+        .iter()
+        .map(|name| format!("Skipped profile \"{name}\": reserved Codex provider id"))
+        .collect();
+    lines.push(format!("Synced {synced} provider(s) to {}", path.display()));
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +521,31 @@ mod tests {
                 "Back".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn sync_codex_summary_lists_skipped_warnings_then_summary() {
+        let skipped = vec!["openai".to_string(), "azure".to_string()];
+
+        let summary = sync_codex_summary(
+            3,
+            std::path::Path::new("/home/user/.codex/config.toml"),
+            &skipped,
+        );
+
+        assert_eq!(
+            summary,
+            "Skipped profile \"openai\": reserved Codex provider id\n\
+             Skipped profile \"azure\": reserved Codex provider id\n\
+             Synced 3 provider(s) to /home/user/.codex/config.toml"
+        );
+    }
+
+    #[test]
+    fn sync_codex_summary_without_skipped_shows_only_summary() {
+        let summary = sync_codex_summary(2, std::path::Path::new("/tmp/config.toml"), &[]);
+
+        assert_eq!(summary, "Synced 2 provider(s) to /tmp/config.toml");
     }
 
     #[test]
