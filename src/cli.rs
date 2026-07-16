@@ -32,7 +32,11 @@ pub enum Command {
         profile: Option<String>,
     },
     Show,
-    ShowCommand,
+    ShowCommand {
+        /// Optional launch target; bare `show-command` defaults to Claude.
+        #[command(subcommand)]
+        target: Option<StartTarget>,
+    },
     New {
         #[arg(long)]
         name: String,
@@ -114,7 +118,7 @@ pub fn run() -> Result<()> {
             None => use_profile_interactively(&repository),
         },
         Some(Command::Show) => show_config(&repository),
-        Some(Command::ShowCommand) => show_command(&repository),
+        Some(Command::ShowCommand { target }) => show_command(&repository, target),
         Some(Command::Start { target }) => match target {
             None | Some(StartTarget::Claude) => start_command(&repository),
             Some(StartTarget::Codex) => start_codex_command(&repository),
@@ -383,9 +387,26 @@ fn start_codex_command(repository: &ConfigRepository) -> Result<()> {
     launch::start_codex(&config)
 }
 
-fn show_command(repository: &ConfigRepository) -> Result<()> {
+fn show_command(repository: &ConfigRepository, target: Option<StartTarget>) -> Result<()> {
     let config = repository.load()?;
-    let spec = launch::build_command_spec(&config)?;
+    let spec = match target {
+        None | Some(StartTarget::Claude) => launch::build_command_spec(&config)?,
+        Some(StartTarget::Codex) => {
+            // same order as start_codex_with_path_and_launcher — no sync
+            let Some(name) = config.active_profile.as_deref() else {
+                anyhow::bail!("No active profile is set");
+            };
+            if !config.profiles.contains_key(name) {
+                anyhow::bail!("Active profile '{name}' does not exist");
+            }
+            if sync_codex::is_reserved_provider_id(name) {
+                anyhow::bail!(
+                    "Cannot start Codex: profile '{name}' is a reserved Codex provider id"
+                );
+            }
+            launch::build_codex_command_spec(&config)?
+        }
+    };
     println!("{}", launch::render_command_line(&spec));
     Ok(())
 }

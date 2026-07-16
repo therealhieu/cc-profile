@@ -83,6 +83,96 @@ fn show_command_prints_runnable_command_line() {
 }
 
 #[test]
+fn show_command_claude_prints_runnable_command_line() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    write_config(&temp);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .args(["show-command", "claude"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "ANTHROPIC_BASE_URL=https://api.anthropic.com",
+        ))
+        .stdout(predicate::str::contains("ANTHROPIC_API_KEY=sk-ant-secret"))
+        .stdout(predicate::str::contains(
+            "ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5",
+        ))
+        .stdout(predicate::str::contains("claude"))
+        .stdout(predicate::str::contains("--dangerously-skip-permissions").not());
+}
+
+#[test]
+fn show_command_codex_prints_runnable_command_line() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    write_config(&temp);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .args(["show-command", "codex"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("codex"))
+        .stdout(predicate::str::contains("model_provider="))
+        .stdout(predicate::str::contains("claude-opus-4-8"));
+}
+
+#[test]
+fn show_command_codex_does_not_write_codex_config() {
+    let home = assert_fs::TempDir::new().expect("home tempdir");
+    let codex_home = assert_fs::TempDir::new().expect("codex tempdir");
+    write_config(&home);
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", home.path())
+        .env("CODEX_HOME", codex_home.path())
+        .args(["show-command", "codex"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("codex"));
+
+    assert!(
+        !codex_home.child("config.toml").path().exists(),
+        "show-command codex must not write CODEX_HOME/config.toml"
+    );
+}
+
+#[test]
+fn show_command_codex_rejects_reserved_active_profile() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+    temp.child(".cc-profile/config.toml")
+        .write_str(
+            r#"version = 1
+active_profile = "openai"
+
+[profiles.openai]
+endpoint = "https://reserved.example"
+api_key = "sk-reserved"
+fable = "custom-fable"
+opus = "custom-opus"
+sonnet = "custom-sonnet"
+haiku = "custom-haiku"
+"#,
+        )
+        .expect("write config");
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .args(["show-command", "codex"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Cannot start Codex: profile 'openai' is a reserved Codex provider id",
+        ))
+        .stdout(predicate::str::contains("codex").not());
+}
+
+#[test]
 fn show_command_errors_without_active_profile() {
     let temp = assert_fs::TempDir::new().expect("tempdir");
 
@@ -93,6 +183,30 @@ fn show_command_errors_without_active_profile() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("No active profile is set"));
+}
+
+#[test]
+fn show_command_codex_errors_without_active_profile() {
+    let temp = assert_fs::TempDir::new().expect("tempdir");
+
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .env("HOME", temp.path())
+        .args(["show-command", "codex"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No active profile is set"));
+}
+
+#[test]
+fn show_command_help_lists_claude_and_codex_targets() {
+    Command::cargo_bin("cc-profile")
+        .expect("binary exists")
+        .args(["show-command", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude"))
+        .stdout(predicate::str::contains("codex"));
 }
 
 #[test]
