@@ -146,14 +146,16 @@ haiku = "claude-haiku-4.5"
 | `cc-profile list` | List profiles, marking the active one |
 | `cc-profile use <name>` | Set the active profile |
 | `cc-profile show` | Print the current config and its file path |
-| `cc-profile show-command` | Print the exact Claude shell command that `start` / `start claude` would run |
+| `cc-profile show-command` | Print the Claude shell command (`start` / `start claude`) |
+| `cc-profile show-command claude` | Same as bare `show-command` |
+| `cc-profile show-command codex` | Print the Codex shell command `start codex` would run (no sync; reserved active profile fails like start) |
 | `cc-profile new --name … --endpoint … --api-key … --fable … --opus … --sonnet … --haiku … [--active]` | Create a profile |
 | `cc-profile edit <name> [--endpoint …] [--api-key …] [--fable …] [--opus …] [--sonnet …] [--haiku …] [--rename …]` | Update fields on a profile |
 | `cc-profile delete <name>` | Delete a profile |
 | `cc-profile sync codex` | Write every profile into `~/.codex/config.toml` as a Codex custom provider (preserves other Codex config) |
 | `cc-profile update` | Update cc-profile itself (see below) |
 
-`start` / `start claude` launch Claude Code with the active profile’s env vars and args. `start codex` first auto-syncs all profiles into the Codex config ([Sync](#sync)), then runs `codex -c model_provider="<active>" --model "<opus>"`. The API key stays in the `0o600` Codex config `http_headers` only — never on argv. `show-command` remains Claude-only.
+`start` / `start claude` launch Claude Code with the active profile’s env vars and args. `start codex` first auto-syncs all profiles into the Codex config ([Sync](#sync)), then runs `codex -c model_provider="<active>" --model "<opus>"`. The API key stays in the `0o600` Codex config `http_headers` only — never on argv. `show-command` mirrors `start` targets; the codex path is print-only (no provider sync).
 
 ## Sync
 

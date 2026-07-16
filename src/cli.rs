@@ -87,9 +87,9 @@ pub enum Command {
     },
 }
 
-/// Nested launch targets for `cc-profile start`.
+/// Nested launch targets for `cc-profile start` and `cc-profile show-command`.
 ///
-/// Optional on `Command::Start` so bare `start` remains valid and defaults to Claude.
+/// Optional on those commands so bare `start` / `show-command` remain valid and default to Claude.
 #[derive(Debug, Subcommand)]
 pub enum StartTarget {
     Claude,
